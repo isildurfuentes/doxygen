@@ -31,6 +31,7 @@
 #include "docparser.h"
 #include "classdef.h"
 #include "arguments.h"
+#include "containers.h"
 
 //--------------------------------------------------------------------
 
@@ -277,6 +278,7 @@ QCString insertTemplateSpecifierInScope(const QCString &scope,const QCString &te
 QCString stripScope(const char *name);
 
 QCString convertToId(const char *s);
+QCString correctId(QCString s);
 
 QCString convertToHtml(const char *s,bool keepEntities=TRUE);
 
@@ -436,7 +438,7 @@ bool readInputFile(const char *fileName,BufStr &inBuf,
                    bool filter=TRUE,bool isSourceCode=FALSE);
 QCString filterTitle(const QCString &title);
 
-bool patternMatch(const QFileInfo &fi,const QStrList *patList);
+bool patternMatch(const QFileInfo &fi,const StringVector &patList);
 
 QCString externalLinkTarget(const bool parent = false);
 QCString externalRef(const QCString &relPath,const QCString &ref,bool href);
@@ -470,6 +472,7 @@ QCString processMarkup(const QCString &s);
 bool protectionLevelVisible(Protection prot);
 
 QCString stripIndentation(const QCString &s);
+void stripIndentation(QCString &doc,const int indentationLevel);
 
 QCString getDotImageExtension(void);
 

@@ -154,7 +154,9 @@ static void writeXMLHeader(FTextStream &t)
   t << "<?xml version='1.0' encoding='UTF-8' standalone='no'?>" << endl;;
   t << "<doxygen xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ";
   t << "xsi:noNamespaceSchemaLocation=\"compound.xsd\" ";
-  t << "version=\"" << getDoxygenVersion() << "\">" << endl;
+  t << "version=\"" << getDoxygenVersion() << "\" ";
+  t << "xml:lang=\"" << theTranslator->trISOLang() << "\"";
+  t << ">" << endl;
 }
 
 static void writeCombineScript()
@@ -178,7 +180,7 @@ static void writeCombineScript()
   "<xsl:stylesheet xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" version=\"1.0\">\n"
   "  <xsl:output method=\"xml\" version=\"1.0\" indent=\"no\" standalone=\"yes\" />\n"
   "  <xsl:template match=\"/\">\n"
-  "    <doxygen version=\"{doxygenindex/@version}\">\n"
+  "    <doxygen version=\"{doxygenindex/@version}\" xml:lang=\"{doxygenindex/@xml:lang}\">\n"
   "      <!-- Load all doxygen generated xml files -->\n"
   "      <xsl:for-each select=\"doxygenindex/compound\">\n"
   "        <xsl:copy-of select=\"document( concat( @refid, '.xml' ) )/doxygen/*\" />\n"
@@ -401,7 +403,8 @@ static void writeXMLDocBlock(FTextStream &t,
   QCString stext = text.stripWhiteSpace();
   if (stext.isEmpty()) return;
   // convert the documentation string into an abstract syntax tree
-  DocNode *root = validatingParseDoc(fileName,lineNr,scope,md,text,FALSE,FALSE);
+  DocNode *root = validatingParseDoc(fileName,lineNr,scope,md,text,FALSE,FALSE,
+                                     0,FALSE,FALSE,Config_getBool(MARKDOWN_SUPPORT));
   // create a code generator
   XMLCodeGenerator *xmlCodeGen = new XMLCodeGenerator(t);
   // create a parse tree visitor for XML
@@ -1150,7 +1153,8 @@ static void writeInnerNamespaces(const NamespaceSDict *nl,FTextStream &t)
       if (!nd->isHidden() && !nd->isAnonymous())
       {
         t << "    <innernamespace refid=\"" << nd->getOutputFileBase()
-          << "\">" << convertToXML(nd->name()) << "</innernamespace>" << endl;
+          << "\"" << (nd->isInline() ? " inline=\"yes\"" : "")
+          << ">" << convertToXML(nd->name()) << "</innernamespace>" << endl;
       }
     }
   }
@@ -1458,7 +1462,9 @@ static void generateXMLForNamespace(const NamespaceDef *nd,FTextStream &ti)
 
   writeXMLHeader(t);
   t << "  <compounddef id=\"" << nd->getOutputFileBase()
-    << "\" kind=\"namespace\" language=\""
+    << "\" kind=\"namespace\" "
+    << (nd->isInline()?"inline=\"yes\" ":"")
+    << "language=\""
     << langToString(nd->getLanguage()) << "\">" << endl;
   t << "    <compoundname>";
   writeXMLString(t,nd->name());
@@ -1907,6 +1913,7 @@ void generateXML()
   QDir xmlDir(outputDirectory);
   createSubDirs(xmlDir);
 
+  ResourceMgr::instance().copyResource("xml.xsd",outputDirectory);
   ResourceMgr::instance().copyResource("index.xsd",outputDirectory);
 
   QCString fileName=outputDirectory+"/compound.xsd";
@@ -1959,7 +1966,9 @@ void generateXML()
   t << "<?xml version='1.0' encoding='UTF-8' standalone='no'?>" << endl;;
   t << "<doxygenindex xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ";
   t << "xsi:noNamespaceSchemaLocation=\"index.xsd\" ";
-  t << "version=\"" << getDoxygenVersion() << "\">" << endl;
+  t << "version=\"" << getDoxygenVersion() << "\" ";
+  t << "xml:lang=\"" << theTranslator->trISOLang() << "\"";
+  t << ">" << endl;
 
   {
     ClassSDict::Iterator cli(*Doxygen::classSDict);

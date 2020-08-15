@@ -30,6 +30,10 @@
 #include "memberlist.h"
 #include "define.h"
 
+#define THREAD_LOCAL thread_local
+#define AtomicInt    std::atomic_int
+#define AtomicBool   std::atomic_bool
+
 class RefList;
 class PageSList;
 class PageSDict;
@@ -136,10 +140,9 @@ class Doxygen
     static int                       subpageNestingLevel;
     static QCString                  spaces;
     static bool                      generatingXmlOutput;
-    static bool                      markdownSupport;
     static GenericsSDict            *genericsDict;
-    static Preprocessor             *preprocessor;
-    static DefineList                macroDefinitions;
+    static DefinesPerFileList        macroDefinitions;
+    static bool                      clangAssistedParsing;
 };
 
 void initDoxygen();
@@ -154,8 +157,8 @@ void cleanUpDoxygen();
 int readFileOrDirectory(const char *s,
                         FileNameLinkedMap *fnDict,
                         StringUnorderedSet *exclSet,
-                        QStrList *patList,
-                        QStrList *exclPatList,
+                        const StringVector *patList,
+                        const StringVector *exclPatList,
                         StringVector *resultList,
                         StringUnorderedSet *resultSet,
                         bool recursive,

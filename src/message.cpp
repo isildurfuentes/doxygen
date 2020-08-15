@@ -18,6 +18,9 @@
 #include "debug.h"
 #include "portable.h"
 #include "message.h"
+#include "doxygen.h"
+
+#include <mutex>
 
 static QCString outputFormat;
 static const char *warning_str = "warning: ";
@@ -30,6 +33,9 @@ static const char *error_str = "error: ";
 //                            // 6 = $line,$file,$text
 
 static FILE *warnFile = stderr;
+
+
+static std::mutex g_mutex;
 
 void initWarningFormat()
 {
@@ -104,9 +110,10 @@ void msg(const char *fmt, ...)
 {
   if (!Config_getBool(QUIET))
   {
+    std::unique_lock<std::mutex> lock(g_mutex);
     if (Debug::isFlagSet(Debug::Time))
     {
-      printf("%.3f sec: ",((double)Debug::elapsedTime())/1000.0);
+      printf("%.3f sec: ",((double)Debug::elapsedTime()));
     }
     va_list args;
     va_start(args, fmt);
@@ -143,8 +150,11 @@ static void format_warn(const char *file,int line,const char *text)
   }
   msgText += '\n';
 
-  // print resulting message
-  fwrite(msgText.data(),1,msgText.length(),warnFile);
+  {
+    std::unique_lock<std::mutex> lock(g_mutex);
+    // print resulting message
+    fwrite(msgText.data(),1,msgText.length(),warnFile);
+  }
   if (warnAsError)
   {
     exit(1);
@@ -240,14 +250,17 @@ extern void err_full(const char *file,int line,const char *fmt, ...)
 
 void term(const char *fmt, ...)
 {
-  va_list args;
-  va_start(args, fmt);
-  vfprintf(warnFile, (QCString(error_str) + fmt).data(), args);
-  va_end(args);
-  if (warnFile != stderr)
   {
-    for (int i = 0; i < (int)strlen(error_str); i++) fprintf(warnFile, " ");
-    fprintf(warnFile, "%s\n", "Exiting...");
+    std::unique_lock<std::mutex> lock(g_mutex);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(warnFile, (QCString(error_str) + fmt).data(), args);
+    va_end(args);
+    if (warnFile != stderr)
+    {
+      for (int i = 0; i < (int)strlen(error_str); i++) fprintf(warnFile, " ");
+      fprintf(warnFile, "%s\n", "Exiting...");
+    }
   }
   exit(1);
 }
@@ -263,6 +276,7 @@ void printlex(int dbg, bool enter, const char *lexName, const char *fileName)
     enter_txt_uc = "Finished";
   }
 
+  std::unique_lock<std::mutex> lock(g_mutex);
   if (dbg)
   {
     if (fileName)
