@@ -164,7 +164,7 @@ DefinesPerFileList Doxygen::macroDefinitions;
 bool             Doxygen::clangAssistedParsing = FALSE;
 
 // locally accessible globals
-static std::unordered_map< std::string, const Entry* > g_classEntries;
+static std::map< std::string, const Entry* > g_classEntries;
 static StringVector     g_inputFiles;
 static QDict<void>      g_compoundKeywordDict(7);  // keywords recognised as compounds
 static OutputList      *g_outputList = 0;          // list of output generating objects
@@ -3680,17 +3680,18 @@ static void transferFunctionReferences()
   {
     MemberDef *mdef=0,*mdec=0;
     /* find a matching function declaration and definition for this function */
-    for (const auto &md : *mn)
+    for (const auto &md_p : *mn)
     {
+      MemberDef *md = md_p.get();
       if (md->isPrototype())
-        mdec=md.get();
+        mdec=md;
       else if (md->isVariable() && md->isExternal())
-        mdec=md.get();
+        mdec=md;
 
       if (md->isFunction() && !md->isStatic() && !md->isPrototype())
-        mdef=md.get();
+        mdef=md;
       else if (md->isVariable() && !md->isExternal() && !md->isStatic())
-        mdef=md.get();
+        mdef=md;
 
       if (mdef && mdec) break;
     }
@@ -6945,7 +6946,14 @@ static void addEnumValuesToEnums(const Entry *root)
       MemberName *mn = mnsd->find(name); // for all members with this name
       if (mn)
       {
-        std::vector< std::unique_ptr<MemberDef> > extraMembers;
+        struct EnumValueInfo
+        {
+          EnumValueInfo(const QCString &n,std::unique_ptr<MemberDef> &md) :
+            name(n), member(std::move(md)) {}
+          QCString name;
+          std::unique_ptr<MemberDef> member;
+        };
+        std::vector< EnumValueInfo > extraMembers;
         // for each enum in this list
         for (const auto &md : *mn)
         {
@@ -7005,8 +7013,7 @@ static void addEnumValuesToEnums(const Entry *root)
                   fmd->setAnchor();
                   md->insertEnumField(fmd.get());
                   fmd->setEnumScope(md.get(),TRUE);
-                  mn=mnsd->add(e->name);
-                  extraMembers.push_back(std::move(fmd));
+                  extraMembers.push_back(EnumValueInfo(e->name,fmd));
                 }
               }
               else
@@ -7070,9 +7077,10 @@ static void addEnumValuesToEnums(const Entry *root)
           }
         }
         // move the newly added members into mn
-        for (auto &md : extraMembers)
+        for (auto &e : extraMembers)
         {
-          mn->push_back(std::move(md));
+          MemberName *emn=mnsd->add(e.name);
+          emn->push_back(std::move(e.member));
         }
       }
     }
@@ -7585,7 +7593,6 @@ static void generateFileSources()
           {
             msg("Generating code for file %s...\n",fd->docName().data());
             fd->writeSource(*g_outputList,nullptr);
-
           }
           else if (!fd->isReference() && Doxygen::parseSourcesNeeded)
             // we needed to parse the sources even if we do not show them
@@ -7708,23 +7715,23 @@ static void buildDefineList()
       for (const auto &def : it->second)
       {
         std::unique_ptr<MemberDef> md { createMemberDef(
-            def->fileName,def->lineNr,def->columnNr,
-            "#define",def->name,def->args,0,
+            def.fileName,def.lineNr,def.columnNr,
+            "#define",def.name,def.args,0,
             Public,Normal,FALSE,Member,MemberType_Define,
             ArgumentList(),ArgumentList(),"") };
 
-        if (!def->args.isEmpty())
+        if (!def.args.isEmpty())
         {
-          md->moveArgumentList(stringToArgumentList(SrcLangExt_Cpp, def->args));
+          md->moveArgumentList(stringToArgumentList(SrcLangExt_Cpp, def.args));
         }
-        md->setInitializer(def->definition);
-        md->setFileDef(def->fileDef);
-        md->setDefinition("#define "+def->name);
+        md->setInitializer(def.definition);
+        md->setFileDef(def.fileDef);
+        md->setDefinition("#define "+def.name);
 
-        MemberName *mn=Doxygen::functionNameLinkedMap->add(def->name);
-        if (def->fileDef)
+        MemberName *mn=Doxygen::functionNameLinkedMap->add(def.name);
+        if (def.fileDef)
         {
-          def->fileDef->insertMember(md.get());
+          def.fileDef->insertMember(md.get());
         }
         mn->push_back(std::move(md));
       }
@@ -9142,7 +9149,7 @@ static void parseFilesMultiThreading(const std::shared_ptr<Entry> &root)
     {
       numThreads = std::thread::hardware_concurrency();
     }
-    msg("Processing input using %lu threads.\n",numThreads);
+    msg("Processing input using %zu threads.\n",numThreads);
     ThreadPool threadPool(numThreads);
     using FutureType = std::vector< std::shared_ptr<Entry> >;
     std::vector< std::future< FutureType > > results;
@@ -9237,7 +9244,7 @@ static void parseFilesMultiThreading(const std::shared_ptr<Entry> &root)
 #endif
   {
     std::size_t numThreads = std::thread::hardware_concurrency();
-    msg("Processing input using %lu threads.\n",numThreads);
+    msg("Processing input using %zu threads.\n",numThreads);
     ThreadPool threadPool(numThreads);
     using FutureType = std::shared_ptr<Entry>;
     std::vector< std::future< FutureType > > results;
@@ -9466,7 +9473,7 @@ static int readDir(QFileInfo *fi,
         {
           if (errorIfNotExist)
           {
-            warn_uncond("source %s is not a readable file or directory... skipping.\n",cfi->absFilePath().data());
+            warn_uncond("source '%s' is not a readable file or directory... skipping.\n",cfi->absFilePath().data());
           }
         }
         else if (cfi->isFile() &&
@@ -9546,7 +9553,7 @@ int readFileOrDirectory(const char *s,
       {
         if (errorIfNotExist)
         {
-          warn_uncond("source %s is not a readable file or directory... skipping.\n",s);
+          warn_uncond("source '%s' is not a readable file or directory... skipping.\n",s);
         }
       }
       else if (!Config_getBool(EXCLUDE_SYMLINKS) || !fi.isSymLink())
@@ -11382,10 +11389,10 @@ void generateOutput()
   bool generateDocbook = Config_getBool(GENERATE_DOCBOOK);
 
 
-  g_outputList = new OutputList(TRUE);
+  g_outputList = new OutputList;
   if (generateHtml)
   {
-    g_outputList->add(new HtmlGenerator);
+    g_outputList->add<HtmlGenerator>();
     HtmlGenerator::init();
 
     // add HTML indexers that are enabled
@@ -11404,22 +11411,22 @@ void generateOutput()
   }
   if (generateLatex)
   {
-    g_outputList->add(new LatexGenerator);
+    g_outputList->add<LatexGenerator>();
     LatexGenerator::init();
   }
   if (generateDocbook)
   {
-    g_outputList->add(new DocbookGenerator);
+    g_outputList->add<DocbookGenerator>();
     DocbookGenerator::init();
   }
   if (generateMan)
   {
-    g_outputList->add(new ManGenerator);
+    g_outputList->add<ManGenerator>();
     ManGenerator::init();
   }
   if (generateRtf)
   {
-    g_outputList->add(new RTFGenerator);
+    g_outputList->add<RTFGenerator>();
     RTFGenerator::init();
   }
   if (Config_getBool(USE_HTAGS))
@@ -11532,7 +11539,7 @@ void generateOutput()
   generateDirDocs(*g_outputList);
   g_s.end();
 
-  if (g_outputList->count()>0)
+  if (g_outputList->size()>0)
   {
     writeIndexHierarchy(*g_outputList);
   }
