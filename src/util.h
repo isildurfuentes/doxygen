@@ -337,7 +337,9 @@ void addRefItem(const RefItemVector &sli,
 PageDef *addRelatedPage(const char *name,
                         const QCString &ptitle,
                         const QCString &doc,
-                        const char *fileName,int startLine,
+                        const char *fileName,
+                        int docLine,
+                        int startLine,
                         const RefItemVector &sli = RefItemVector(),
                         GroupDef *gd=0,
                         const TagInfo *tagInfo=0,
@@ -351,10 +353,11 @@ QCString unescapeCharsInString(const char *s);
 void addGroupListToTitle(OutputList &ol,const Definition *d);
 
 void filterLatexString(FTextStream &t,const char *str,
-                       bool insideTabbing=FALSE,
-                       bool insidePre=FALSE,
-                       bool insideItem=FALSE,
-                       bool keepSpaces=FALSE);
+                       bool insideTabbing,
+                       bool insidePre,
+                       bool insideItem,
+                       bool insideTable,
+                       bool keepSpaces);
 
 QCString latexEscapeLabelName(const char *s);
 QCString latexEscapeIndexChars(const char *s);
@@ -474,7 +477,7 @@ bool protectionLevelVisible(Protection prot);
 QCString stripIndentation(const QCString &s);
 void stripIndentation(QCString &doc,const int indentationLevel);
 
-QCString getDotImageExtension(void);
+QCString getDotImageExtension();
 
 bool fileVisibleInIndex(const FileDef *fd,bool &genSourceFile);
 
@@ -498,8 +501,7 @@ bool openOutputFile(const char *outFile,QFile &f);
 void writeExtraLatexPackages(FTextStream &t);
 void writeLatexSpecialFormulaChars(FTextStream &t);
 
-int usedTableLevels();
-void incUsedTableLevels();
-void decUsedTableLevels();
+bool recognizeFixedForm(const char* contents, FortranFormat format);
+FortranFormat convertFileNameFortranParserCode(QCString fn);
 
 #endif

@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <memory>
+#include <cinttypes>
 
 #include "version.h"
 #include "doxygen.h"
@@ -145,7 +146,7 @@ QDict<DefinitionIntf> *Doxygen::symbolMap = 0;
 QDict<Definition> *Doxygen::clangUsrMap = 0;
 bool             Doxygen::outputToWizard=FALSE;
 QDict<int> *     Doxygen::htmlDirMap = 0;
-QCache<LookupInfo> *Doxygen::lookupCache;
+Cache<std::string,LookupInfo> *Doxygen::lookupCache;
 DirSDict        *Doxygen::directories;
 SDict<DirRelation> Doxygen::dirRelations(257);
 ParserManager   *Doxygen::parserManager = 0;
@@ -346,7 +347,9 @@ static void addRelatedPage(Entry *root)
   }
 
   PageDef *pd = addRelatedPage(root->name,root->args,doc,
-      root->docFile,root->docLine,
+      root->docFile,
+      root->docLine,
+      root->startLine,
       root->sli,
       gd,root->tagInfo(),
       FALSE,
@@ -7506,15 +7509,20 @@ static void generateFileSources()
       {
         for (const auto &fd : *fn)
         {
-          if (fd->isSource() && !fd->isReference())
+          if (fd->isSource() && !fd->isReference() &&
+              ((fd->generateSourceFile() && !g_useOutputTemplate) ||
+               (!fd->isReference() && Doxygen::parseSourcesNeeded)
+              )
+             )
           {
             auto clangParser = ClangParser::instance()->createTUParser(fd.get());
             if (fd->generateSourceFile() && !g_useOutputTemplate) // sources need to be shown in the output
             {
               msg("Generating code for file %s...\n",fd->docName().data());
               clangParser->parse();
-              fd->writeSource(*g_outputList,clangParser.get());
-
+              fd->writeSourceHeader(*g_outputList);
+              fd->writeSourceBody(*g_outputList,clangParser.get());
+              fd->writeSourceFooter(*g_outputList);
             }
             else if (!fd->isReference() && Doxygen::parseSourcesNeeded)
               // we needed to parse the sources even if we do not show them
@@ -7538,7 +7546,9 @@ static void generateFileSources()
                   if (ifd->generateSourceFile() && !g_useOutputTemplate) // sources need to be shown in the output
                   {
                     msg(" Generating code for file %s...\n",ifd->docName().data());
-                    ifd->writeSource(*g_outputList,clangParser.get());
+                    ifd->writeSourceHeader(*g_outputList);
+                    ifd->writeSourceBody(*g_outputList,clangParser.get());
+                    ifd->writeSourceFooter(*g_outputList);
                   }
                   else if (!ifd->isReference() && Doxygen::parseSourcesNeeded)
                     // we needed to parse the sources even if we do not show them
@@ -7561,20 +7571,24 @@ static void generateFileSources()
         {
           if (processedFiles.find(fd->absFilePath().str())==processedFiles.end()) // not yet processed
           {
-            auto clangParser = ClangParser::instance()->createTUParser(fd.get());
             if (fd->generateSourceFile() && !Htags::useHtags && !g_useOutputTemplate) // sources need to be shown in the output
             {
+              auto clangParser = ClangParser::instance()->createTUParser(fd.get());
               msg("Generating code for file %s...\n",fd->docName().data());
               clangParser->parse();
-              fd->writeSource(*g_outputList,clangParser.get());
-
+              fd->writeSourceHeader(*g_outputList);
+              fd->writeSourceBody(*g_outputList,clangParser.get());
+              fd->writeSourceFooter(*g_outputList);
             }
             else if (!fd->isReference() && Doxygen::parseSourcesNeeded)
               // we needed to parse the sources even if we do not show them
             {
+              auto clangParser = ClangParser::instance()->createTUParser(fd.get());
               msg("Parsing code for file %s...\n",fd->docName().data());
               clangParser->parse();
-              fd->parseSource(clangParser.get());
+              fd->writeSourceHeader(*g_outputList);
+              fd->writeSourceBody(*g_outputList,clangParser.get());
+              fd->writeSourceFooter(*g_outputList);
             }
           }
         }
@@ -7583,6 +7597,66 @@ static void generateFileSources()
     else
 #endif
     {
+#define MULTITHREADED_SOURCE_GENERATOR 0 // not ready to be enabled yet
+#if MULTITHREADED_SOURCE_GENERATOR
+      std::size_t numThreads = static_cast<std::size_t>(Config_getInt(NUM_PROC_THREADS));
+      if (numThreads==0)
+      {
+        numThreads = std::thread::hardware_concurrency();
+      }
+      msg("Generating code files using %zu threads.\n",numThreads);
+      struct SourceContext
+      {
+        SourceContext(FileDef *fd_,bool gen_,OutputList ol_)
+          : fd(fd_), generateSourceFile(gen_), ol(ol_) {}
+        FileDef *fd;
+        bool generateSourceFile;
+        OutputList ol;
+      };
+      ThreadPool threadPool(numThreads);
+      std::vector< std::future< std::shared_ptr<SourceContext> > > results;
+      for (const auto &fn : *Doxygen::inputNameLinkedMap)
+      {
+        for (const auto &fd : *fn)
+        {
+          bool generateSourceFile = fd->generateSourceFile() && !Htags::useHtags && !g_useOutputTemplate;
+          auto ctx = std::make_shared<SourceContext>(fd.get(),generateSourceFile,*g_outputList);
+          if (generateSourceFile)
+          {
+            msg("Generating code for file %s...\n",fd->docName().data());
+            fd->writeSourceHeader(ctx->ol);
+          }
+          else
+          {
+            msg("Parsing code for file %s...\n",fd->docName().data());
+          }
+          auto processFile = [ctx]() {
+            StringVector filesInSameTu;
+            ctx->fd->getAllIncludeFilesRecursively(filesInSameTu);
+            if (ctx->generateSourceFile) // sources need to be shown in the output
+            {
+              ctx->fd->writeSourceBody(ctx->ol,nullptr);
+            }
+            else if (!ctx->fd->isReference() && Doxygen::parseSourcesNeeded)
+              // we needed to parse the sources even if we do not show them
+            {
+              ctx->fd->parseSource(nullptr);
+            }
+            return ctx;
+          };
+          results.emplace_back(threadPool.queue(processFile));
+        }
+      }
+      for (auto &f : results)
+      {
+        std::shared_ptr<SourceContext> ctx = f.get();
+        if (ctx->generateSourceFile)
+        {
+          ctx->fd->writeSourceFooter(ctx->ol);
+        }
+      }
+
+#else // single threaded version
       for (const auto &fn : *Doxygen::inputNameLinkedMap)
       {
         for (const auto &fd : *fn)
@@ -7592,7 +7666,9 @@ static void generateFileSources()
           if (fd->generateSourceFile() && !Htags::useHtags && !g_useOutputTemplate) // sources need to be shown in the output
           {
             msg("Generating code for file %s...\n",fd->docName().data());
-            fd->writeSource(*g_outputList,nullptr);
+            fd->writeSourceHeader(*g_outputList);
+            fd->writeSourceBody(*g_outputList,nullptr);
+            fd->writeSourceFooter(*g_outputList);
           }
           else if (!fd->isReference() && Doxygen::parseSourcesNeeded)
             // we needed to parse the sources even if we do not show them
@@ -7602,6 +7678,7 @@ static void generateFileSources()
           }
         }
       }
+#endif
     }
   }
 }
@@ -8047,15 +8124,20 @@ static void flushCachedTemplateRelations()
   // as there can be new template instances in the inheritance path
   // to this class. Optimization: only remove those classes that
   // have inheritance instances as direct or indirect sub classes.
-  QCacheIterator<LookupInfo> ci(*Doxygen::lookupCache);
-  LookupInfo *li=0;
-  for (ci.toFirst();(li=ci.current());++ci)
+  StringVector elementsToRemove;
+  for (const auto &ci : *Doxygen::lookupCache)
   {
-    if (li->classDef)
+    const LookupInfo &li = ci.second;
+    if (li.classDef)
     {
-      Doxygen::lookupCache->remove(ci.currentKey());
+      elementsToRemove.push_back(ci.first);
     }
   }
+  for (const auto &k : elementsToRemove)
+  {
+    Doxygen::lookupCache->remove(k);
+  }
+
   // remove all cached typedef resolutions whose target is a
   // template class as this may now be a template instance
   // for each global function name
@@ -8099,15 +8181,19 @@ static void flushUnresolvedRelations()
   // class A { class I {} };
   // class B : public A {};
   // class C : public B::I {};
-  //
-  QCacheIterator<LookupInfo> ci(*Doxygen::lookupCache);
-  LookupInfo *li=0;
-  for (ci.toFirst();(li=ci.current());++ci)
+
+  StringVector elementsToRemove;
+  for (const auto &ci : *Doxygen::lookupCache)
   {
-    if (li->classDef==0 && li->typeDef==0)
+    const LookupInfo &li = ci.second;
+    if (li.classDef==0 && li.typeDef==0)
     {
-      Doxygen::lookupCache->remove(ci.currentKey());
+      elementsToRemove.push_back(ci.first);
     }
+  }
+  for (const auto &k : elementsToRemove)
+  {
+    Doxygen::lookupCache->remove(k);
   }
 
   // for each global function name
@@ -8358,6 +8444,7 @@ static void findMainPage(Entry *root)
   {
     if (Doxygen::mainPage==0 && root->tagInfo()==0)
     {
+      //printf("mainpage: docLine=%d startLine=%d\n",root->docLine,root->startLine);
       //printf("Found main page! \n======\n%s\n=======\n",root->doc.data());
       QCString title=root->args.stripWhiteSpace();
       //QCString indexName=Config_getBool(GENERATE_TREEVIEW)?"main":"index";
@@ -8366,6 +8453,7 @@ static void findMainPage(Entry *root)
                               indexName, root->brief+root->doc+root->inbodyDocs,title);
       //setFileNameForSections(root->anchors,"index",Doxygen::mainPage);
       Doxygen::mainPage->setBriefDescription(root->brief,root->briefFile,root->briefLine);
+      Doxygen::mainPage->setBodySegment(root->startLine,root->startLine,-1);
       Doxygen::mainPage->setFileName(indexName);
       Doxygen::mainPage->setLocalToc(root->localToc);
       addPageToContext(Doxygen::mainPage,root);
@@ -8401,7 +8489,7 @@ static void findMainPage(Entry *root)
     {
       warn(root->fileName,root->startLine,
            "found more than one \\mainpage comment block! (first occurrence: %s, line %d), Skipping current block!",
-           Doxygen::mainPage->docFile().data(),Doxygen::mainPage->docLine());
+           Doxygen::mainPage->docFile().data(),Doxygen::mainPage->getStartBodyLine());
     }
   }
   for (const auto &e : root->children()) findMainPage(e.get());
@@ -8624,8 +8712,8 @@ static void generateExampleDocs()
   for (pdi.toFirst();(pd=pdi.current());++pdi)
   {
     msg("Generating docs for example %s...\n",pd->name().data());
-    CodeParserInterface &intf = Doxygen::parserManager->getCodeParser(".c"); // TODO: do this on code type
-    intf.resetCodeParserState();
+    auto intf = Doxygen::parserManager->getCodeParser(".c"); // TODO: do this on code type
+    intf->resetCodeParserState();
     QCString n=pd->getOutputFileBase();
     startFile(*g_outputList,n,n,pd->name());
     startTitle(*g_outputList,n);
@@ -9022,8 +9110,8 @@ static void generateDiskNames()
       // as the common prefix between the first and last entry
       const FileEntry &first = fileEntries[0];
       const FileEntry &last =  fileEntries[size-1];
-      int first_path_size = static_cast<int>(first.path.size());
-      int last_path_size  = static_cast<int>(last.path.size());
+      int first_path_size = static_cast<int>(first.path.size())-1; // -1 to skip trailing slash
+      int last_path_size  = static_cast<int>(last.path.size())-1;  // -1 to skip trailing slash
       int j=0;
       for (int i=0;i<first_path_size && i<last_path_size;i++)
       {
@@ -9825,7 +9913,7 @@ class NullOutlineParser : public OutlineParserInterface
 };
 
 
-template<class T> std::function< std::unique_ptr<T>() > make_output_parser_factory()
+template<class T> std::function< std::unique_ptr<T>() > make_parser_factory()
 {
   return []() { return std::make_unique<T>(); };
 }
@@ -9842,26 +9930,26 @@ void initDoxygen()
   Portable::correct_path();
 
   Debug::startTimer();
-  Doxygen::parserManager = new ParserManager(            make_output_parser_factory<NullOutlineParser>(),
-                                                         std::make_unique<FileCodeParser>());
-  Doxygen::parserManager->registerParser("c",            make_output_parser_factory<COutlineParser>(),
-                                                         std::make_unique<CCodeParser>());
-  Doxygen::parserManager->registerParser("python",       make_output_parser_factory<PythonOutlineParser>(),
-                                                         std::make_unique<PythonCodeParser>());
-  Doxygen::parserManager->registerParser("fortran",      make_output_parser_factory<FortranOutlineParser>(),
-                                                         std::make_unique<FortranCodeParser>());
-  Doxygen::parserManager->registerParser("fortranfree",  make_output_parser_factory<FortranOutlineParserFree>(),
-                                                         std::make_unique<FortranCodeParserFree>());
-  Doxygen::parserManager->registerParser("fortranfixed", make_output_parser_factory<FortranOutlineParserFixed>(),
-                                                         std::make_unique<FortranCodeParserFixed>());
-  Doxygen::parserManager->registerParser("vhdl",         make_output_parser_factory<VHDLOutlineParser>(),
-                                                         std::make_unique<VHDLCodeParser>());
-  Doxygen::parserManager->registerParser("xml",          make_output_parser_factory<NullOutlineParser>(),
-                                                         std::make_unique<XMLCodeParser>());
-  Doxygen::parserManager->registerParser("sql",          make_output_parser_factory<NullOutlineParser>(),
-                                                         std::make_unique<SQLCodeParser>());
-  Doxygen::parserManager->registerParser("md",           make_output_parser_factory<MarkdownOutlineParser>(),
-                                                         std::make_unique<FileCodeParser>());
+  Doxygen::parserManager = new ParserManager(            make_parser_factory<NullOutlineParser>(),
+                                                         make_parser_factory<FileCodeParser>());
+  Doxygen::parserManager->registerParser("c",            make_parser_factory<COutlineParser>(),
+                                                         make_parser_factory<CCodeParser>());
+  Doxygen::parserManager->registerParser("python",       make_parser_factory<PythonOutlineParser>(),
+                                                         make_parser_factory<PythonCodeParser>());
+  Doxygen::parserManager->registerParser("fortran",      make_parser_factory<FortranOutlineParser>(),
+                                                         make_parser_factory<FortranCodeParser>());
+  Doxygen::parserManager->registerParser("fortranfree",  make_parser_factory<FortranOutlineParserFree>(),
+                                                         make_parser_factory<FortranCodeParserFree>());
+  Doxygen::parserManager->registerParser("fortranfixed", make_parser_factory<FortranOutlineParserFixed>(),
+                                                         make_parser_factory<FortranCodeParserFixed>());
+  Doxygen::parserManager->registerParser("vhdl",         make_parser_factory<VHDLOutlineParser>(),
+                                                         make_parser_factory<VHDLCodeParser>());
+  Doxygen::parserManager->registerParser("xml",          make_parser_factory<NullOutlineParser>(),
+                                                         make_parser_factory<XMLCodeParser>());
+  Doxygen::parserManager->registerParser("sql",          make_parser_factory<NullOutlineParser>(),
+                                                         make_parser_factory<SQLCodeParser>());
+  Doxygen::parserManager->registerParser("md",           make_parser_factory<MarkdownOutlineParser>(),
+                                                         make_parser_factory<FileCodeParser>());
 
   // register any additional parsers here...
 
@@ -10037,15 +10125,15 @@ void readConfiguration(int argc, char **argv)
         debugLabel=getArg(argc,argv,optind);
         if (!debugLabel)
         {
-          err("option \"-d\" is missing debug specifier.\n");
           devUsage();
           cleanUpDoxygen();
-          exit(1);
+          exit(0);
         }
         retVal = Debug::setFlag(debugLabel);
         if (!retVal)
         {
           err("option \"-d\" has unknown debug specifier: \"%s\".\n",debugLabel);
+          devUsage();
           cleanUpDoxygen();
           exit(1);
         }
@@ -10838,14 +10926,14 @@ void parseInput()
       if (!dir.mkdir(outputDirectory))
       {
         err("tag OUTPUT_DIRECTORY: Output directory '%s' does not "
-	    "exist and cannot be created\n",outputDirectory.data());
+            "exist and cannot be created\n",outputDirectory.data());
         cleanUpDoxygen();
         exit(1);
       }
       else
       {
-	msg("Notice: Output directory '%s' does not exist. "
-	    "I have created it for you.\n", outputDirectory.data());
+        msg("Notice: Output directory '%s' does not exist. "
+            "I have created it for you.\n", outputDirectory.data());
       }
       dir.cd(outputDirectory);
     }
@@ -10861,8 +10949,7 @@ void parseInput()
   if (cacheSize<0) cacheSize=0;
   if (cacheSize>9) cacheSize=9;
   uint lookupSize = 65536 << cacheSize;
-  Doxygen::lookupCache = new QCache<LookupInfo>(lookupSize,lookupSize);
-  Doxygen::lookupCache->setAutoDelete(TRUE);
+  Doxygen::lookupCache = new Cache<std::string,LookupInfo>(lookupSize);
 
 #ifdef HAS_SIGNALS
   signal(SIGINT, stopDoxygen);
@@ -11504,6 +11591,8 @@ void generateOutput()
   generateExampleDocs();
   g_s.end();
 
+  warn_flush();
+
   g_s.begin("Generating file sources...\n");
   generateFileSources();
   g_s.end();
@@ -11608,6 +11697,8 @@ void generateOutput()
 
   if (g_useOutputTemplate) generateOutputViaTemplate();
 
+  warn_flush();
+
   if (generateRtf)
   {
     g_s.begin("Combining RTF output...\n");
@@ -11618,9 +11709,13 @@ void generateOutput()
     g_s.end();
   }
 
+  warn_flush();
+
   g_s.begin("Running plantuml with JAVA...\n");
   PlantumlManager::instance()->run();
   g_s.end();
+
+  warn_flush();
 
   if (Config_getBool(HAVE_DOT))
   {
@@ -11669,6 +11764,9 @@ void generateOutput()
     QDir::setCurrent(oldDir);
     g_s.end();
   }
+
+  warn_flush();
+
   if ( generateHtml &&
        Config_getBool(GENERATE_QHP) &&
       !Config_getString(QHG_LOCATION).isEmpty())
@@ -11691,9 +11789,9 @@ void generateOutput()
   }
 
   int cacheParam;
-  msg("lookup cache used %d/%d hits=%d misses=%d\n",
-      Doxygen::lookupCache->count(),
+  msg("lookup cache used %zu/%zu hits=%" PRIu64 " misses=%" PRIu64 "\n",
       Doxygen::lookupCache->size(),
+      Doxygen::lookupCache->capacity(),
       Doxygen::lookupCache->hits(),
       Doxygen::lookupCache->misses());
   cacheParam = computeIdealCacheParam(Doxygen::lookupCache->misses()*2/3); // part of the cache is flushed, hence the 2/3 correction factor

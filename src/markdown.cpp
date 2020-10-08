@@ -59,7 +59,7 @@
 #ifdef ENABLE_TRACING
 #define IOSTREAM      stdout
 #define DATA_BUFSIZE  20
-#if defined(_WIN32) && !defined(CYGWIN)
+#if defined(_WIN32) && !defined(CYGWIN) && !defined(__MINGW32__)
 #define PRETTY_FUNC __FUNCSIG__
 #else
 #define PRETTY_FUNC __PRETTY_FUNCTION__
@@ -2264,7 +2264,7 @@ void Markdown::writeFencedCodeBlock(const char *data,const char *lng,
   }
   addStrEscapeUtf8Nbsp(data+blockStart,blockEnd-blockStart);
   m_out.addStr("\n");
-  m_out.addStr("@endcode\n");
+  m_out.addStr("@endcode");
 }
 
 QCString Markdown::processQuotations(const QCString &s,int refIndent)
@@ -2491,18 +2491,20 @@ static bool isExplicitPage(const QCString &docs)
   return FALSE;
 }
 
-QCString Markdown::extractPageTitle(QCString &docs,QCString &id)
+QCString Markdown::extractPageTitle(QCString &docs,QCString &id, int &prepend)
 {
   TRACE(docs.data());
-  int ln=0;
   // first first non-empty line
+  prepend = 0;
   QCString title;
-  const char *data = docs.data();
   int i=0;
   int size=docs.size();
+  QCString docs_org(docs);
+  const char *data = docs_org.data();
+  docs = "";
   while (i<size && (data[i]==' ' || data[i]=='\n'))
   {
-    if (data[i]=='\n') ln++;
+    if (data[i]=='\n') prepend++;
     i++;
   }
   if (i>=size) return "";
@@ -2512,16 +2514,13 @@ QCString Markdown::extractPageTitle(QCString &docs,QCString &id)
   // first line from i..end1
   if (end1<size)
   {
-    ln++;
     // second line form end1..end2
     int end2=end1+1;
     while (end2<size && data[end2-1]!='\n') end2++;
     if (isHeaderline(data+end1,size-end1,FALSE))
     {
       convertStringFragment(title,data+i,end1-i-1);
-      QCString lns;
-      lns.fill('\n',ln);
-      docs=lns+docs.mid(end2);
+      docs+="\n\n"+docs_org.mid(end2);
       id = extractTitleId(title, 0);
       //printf("extractPageTitle(title='%s' docs='%s' id='%s')\n",title.data(),docs.data(),id.data());
       return title;
@@ -2529,10 +2528,11 @@ QCString Markdown::extractPageTitle(QCString &docs,QCString &id)
   }
   if (i<end1 && isAtxHeader(data+i,end1-i,title,id,FALSE)>0)
   {
-    docs=docs.mid(end1);
+    docs+=docs_org.mid(end1);
   }
   else
   {
+    docs=docs_org;
     id = extractTitleId(title, 0);
   }
   //printf("extractPageTitle(title='%s' docs='%s' id='%s')\n",title.data(),docs.data(),id.data());
@@ -2662,6 +2662,7 @@ QCString markdownFileNameToId(const QCString &fileName)
   int i = baseFn.findRev('.');
   if (i!=-1) baseFn = baseFn.left(i);
   QCString baseName = substitute(substitute(substitute(baseFn," ","_"),"/","_"),":","_");
+  //printf("markdownFileNameToId(%s)=md_%s\n",qPrint(fileName),qPrint(baseName));
   return "md_"+baseName;
 }
 
@@ -2686,6 +2687,7 @@ void MarkdownOutlineParser::parseInput(const char *fileName,
                 ClangTUParser* /*clangParser*/)
 {
   std::shared_ptr<Entry> current = std::make_shared<Entry>();
+  int prepend = 0; // number of empty lines in front
   current->lang = SrcLangExt_Markdown;
   current->fileName = fileName;
   current->docFile  = fileName;
@@ -2693,7 +2695,7 @@ void MarkdownOutlineParser::parseInput(const char *fileName,
   QCString docs = fileBuf;
   QCString id;
   Markdown markdown(fileName,1,0);
-  QCString title=markdown.extractPageTitle(docs,id).stripWhiteSpace();
+  QCString title=markdown.extractPageTitle(docs,id,prepend).stripWhiteSpace();
   if (id.startsWith("autotoc_md")) id = "";
   int indentLevel=title.isEmpty() ? 0 : -1;
   markdown.setIndentLevel(indentLevel);
@@ -2710,24 +2712,26 @@ void MarkdownOutlineParser::parseInput(const char *fileName,
          QFileInfo(mdfileAsMainPage).absFilePath()) // file reference with path
        )
     {
-      docs.prepend("@anchor " + id + "\n");
-      docs.prepend("@mainpage "+title+"\n");
+      docs.prepend("@anchor " + id + "\\ilinebr ");
+      docs.prepend("@mainpage "+title+"\\ilinebr ");
     }
     else if (id=="mainpage" || id=="index")
     {
       if (title.isEmpty()) title = titleFn;
-      docs.prepend("@anchor " + id + "\n");
-      docs.prepend("@mainpage "+title+"\n");
+      docs.prepend("@anchor " + id + "\\ilinebr ");
+      docs.prepend("@mainpage "+title+"\\ilinebr ");
     }
     else
     {
-      if (title.isEmpty()) title = titleFn;
-      if (!wasEmpty) docs.prepend("@anchor " +  markdownFileNameToId(fileName) + "\n");
-      docs.prepend("@page "+id+" "+title+"\n");
+      if (title.isEmpty()) {title = titleFn;prepend=0;}
+      if (!wasEmpty) docs.prepend("@anchor " +  markdownFileNameToId(fileName) + "\\ilinebr ");
+      docs.prepend("@page "+id+" "+title+"\\ilinebr ");
     }
+    for (int i = 0; i < prepend; i++) docs.prepend("\n");
   }
   int lineNr=1;
 
+  p->commentScanner.enterFile(fileName,lineNr);
   Protection prot=Public;
   bool needsEntry = FALSE;
   int position=0;
@@ -2759,6 +2763,7 @@ void MarkdownOutlineParser::parseInput(const char *fileName,
   {
     root->moveToSubEntryAndKeep(current);
   }
+  p->commentScanner.leaveFile(fileName,lineNr);
 }
 
 void MarkdownOutlineParser::parsePrototype(const char *text)

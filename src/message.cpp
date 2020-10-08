@@ -161,7 +161,7 @@ static void format_warn(const char *file,int line,const char *text)
   }
 }
 
-static void handle_warn_as_error(void)
+static void handle_warn_as_error()
 {
   static bool warnAsError = Config_getBool(WARN_AS_ERROR);
   if (warnAsError)
@@ -278,6 +278,12 @@ void term(const char *fmt, ...)
   }
   exit(1);
 }
+
+void warn_flush()
+{
+  fflush(warnFile);
+}
+
 
 void printlex(int dbg, bool enter, const char *lexName, const char *fileName)
 {
