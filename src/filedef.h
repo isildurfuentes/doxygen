@@ -18,6 +18,8 @@
 #ifndef FILEDEF_H
 #define FILEDEF_H
 
+#include <set>
+
 #include "index.h"
 #include <qlist.h>
 #include <qintdict.h>
@@ -26,11 +28,11 @@
 #include "sortdict.h"
 #include "memberlist.h"
 #include "containers.h"
+#include "classlist.h"
 
 class MemberList;
 class FileDef;
 class FileList;
-class ClassSDict;
 class ClassDef;
 class ClassList;
 class MemberDef;
@@ -42,6 +44,10 @@ class PackageDef;
 class DirDef;
 class FTextStream;
 class ClangTUParser;
+
+// --- Set of files
+
+using FileDefSet = std::set<const FileDef*>;
 
 /** Class representing the data associated with a \#include statement. */
 struct IncludeInfo
@@ -62,7 +68,7 @@ struct IncludeInfo
  *  The member writeDocumentation() can be used to generate the page of
  *  documentation to HTML and LaTeX.
  */
-class FileDef : virtual public Definition
+class FileDef : public DefinitionMutable, public Definition
 {
   public:
    ~FileDef() {}
@@ -72,7 +78,7 @@ class FileDef : virtual public Definition
     virtual DefType definitionType() const = 0;
 
     /*! Returns the unique file name (this may include part of the path). */
-    virtual const QCString &name() const = 0;
+    virtual QCString name() const = 0;
     virtual QCString displayName(bool=TRUE) const = 0;
     virtual QCString fileName() const = 0;
 
@@ -116,8 +122,8 @@ class FileDef : virtual public Definition
 
     virtual PackageDef *packageDef() const = 0;
     virtual DirDef *getDirDef() const = 0;
-    virtual NamespaceSDict *getUsedNamespaces() const = 0;
-    virtual SDict<Definition> *getUsedClasses() const = 0;
+    virtual LinkedRefMap<const NamespaceDef> getUsedNamespaces() const = 0;
+    virtual LinkedRefMap<const ClassDef> getUsedClasses() const = 0;
     virtual QList<IncludeInfo> *includeFileList() const = 0;
     virtual QList<IncludeInfo> *includedByFileList() const = 0;
     virtual void getAllIncludeFilesRecursively(StringVector &incFiles) const = 0;
@@ -128,7 +134,7 @@ class FileDef : virtual public Definition
     /* user defined member groups */
     virtual MemberGroupSDict *getMemberGroupSDict() const = 0;
     virtual NamespaceSDict *getNamespaceSDict() const = 0;
-    virtual ClassSDict *getClassSDict() const = 0;
+    virtual ClassLinkedRefMap getClasses() const = 0;
 
     virtual QCString title() const = 0;
     virtual bool hasDetailedDescription() const = 0;
@@ -157,7 +163,7 @@ class FileDef : virtual public Definition
     virtual void setDiskName(const QCString &name) = 0;
 
     virtual void insertMember(MemberDef *md) = 0;
-    virtual void insertClass(ClassDef *cd) = 0;
+    virtual void insertClass(const ClassDef *cd) = 0;
     virtual void insertNamespace(NamespaceDef *nd) = 0;
     virtual void computeAnchors() = 0;
 
@@ -165,7 +171,7 @@ class FileDef : virtual public Definition
     virtual void setDirDef(DirDef *dd) = 0;
 
     virtual void addUsingDirective(const NamespaceDef *nd) = 0;
-    virtual void addUsingDeclaration(Definition *def) = 0;
+    virtual void addUsingDeclaration(const ClassDef *cd) = 0;
     virtual void combineUsingRelations() = 0;
 
     virtual bool generateSourceFile() const = 0;
@@ -177,15 +183,20 @@ class FileDef : virtual public Definition
     virtual void addMembersToMemberGroup() = 0;
     virtual void distributeMemberGroupDocumentation() = 0;
     virtual void findSectionsInDocumentation() = 0;
-    virtual void addIncludedUsingDirectives() = 0;
+    virtual void addIncludedUsingDirectives(FileDefSet &visitedFiles) = 0;
 
     virtual void addListReferences() = 0;
-
-    virtual void setVisited(bool v) = 0;
-    virtual bool isVisited() const = 0;
 };
 
 FileDef *createFileDef(const char *p,const char *n,const char *ref=0,const char *dn=0);
+
+
+// --- Cast functions
+
+FileDef            *toFileDef(Definition *d);
+const FileDef      *toFileDef(const Definition *d);
+
+// ------------------
 
 /** Class representing a list of FileDef objects. */
 class FileList : public QList<FileDef>

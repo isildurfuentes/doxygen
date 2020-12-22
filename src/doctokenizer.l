@@ -75,7 +75,7 @@ struct DocLexerContext
   TokenInfo *token;
   int rule;
   int autoListLevel;
-  int inputPos;
+  yy_size_t inputPos;
   const char *inputString;
   YY_BUFFER_STATE state;
 };
@@ -84,7 +84,7 @@ static QStack<DocLexerContext> g_lexerStack;
 
 static int g_yyLineNr = 0;
 
-#define lineCount(s,len) do { for(int i=0;i<len;i++) if (s[i]=='\n') g_yyLineNr++; } while(0)
+#define lineCount(s,len) do { for(int i=0;i<(int)len;i++) if (s[i]=='\n') g_yyLineNr++; } while(0)
 
 
 #if USE_STATE2STRING
@@ -342,6 +342,7 @@ static QCString stripEmptyLines(const QCString &s)
   return s.mid(start,end-start);
 }
 
+#define unput_string(yytext,yyleng) do { for (int i=(int)yyleng-1;i>=0;i--) unput(yytext[i]); } while(0)
 //--------------------------------------------------------------------------
 
 #undef  YY_INPUT
@@ -383,11 +384,11 @@ OLISTITEM {BLANK}*[1-9][0-9]*"."{BLANK}
 ENDLIST   {BLANK}*"."{BLANK}*\n
 ATTRNAME  [a-z_A-Z\x80-\xFF][:a-z_A-Z0-9\x80-\xFF\-]*
 ATTRIB    {ATTRNAME}{WS}*("="{WS}*(("\""[^\"]*"\"")|("'"[^\']*"'")|[^ \t\r\n'"><]+))?
-URLCHAR   [a-z_A-Z0-9\!\~\,\:\;\'\$\?\@\&\%\#\.\-\+\/\=]
+URLCHAR   [a-z_A-Z0-9\!\~\,\:\;\'\$\?\@\&\%\#\.\-\+\/\=\x80-\xFF]
 URLMASK   ({URLCHAR}+([({]{URLCHAR}*[)}])?)+
-URLPROTOCOL ("http:"|"https:"|"ftp:"|"file:"|"news:"|"irc")
-FILESCHAR [a-z_A-Z0-9\\:\\\/\-\+&#]
-FILEECHAR [a-z_A-Z0-9\-\+&#]
+URLPROTOCOL ("http:"|"https:"|"ftp:"|"ftps:"|"sftp:"|"file:"|"news:"|"irc:"|"ircs:")
+FILESCHAR [a-z_A-Z0-9\\:\\\/\-\+&#@]
+FILEECHAR [a-z_A-Z0-9\-\+&#@]
 HFILEMASK ("."{FILESCHAR}*{FILEECHAR}+)+
 FILEMASK  ({FILESCHAR}*{FILEECHAR}+("."{FILESCHAR}*{FILEECHAR}+)*)|{HFILEMASK}
 LINKMASK  [^ \t\n\r\\@<&${}]+("("[^\n)]*")")?({BLANK}*("const"|"volatile"){BLANK}+)?
@@ -568,7 +569,6 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
                          }
                        }
 <St_Para>{BLANK}*(\n|"\\ilinebr"){OLISTITEM}     { /* list item on next line */
-                         lineCount(yytext,yyleng);
                          if (!g_markdownSupport || g_insidePre)
                          {
                            REJECT;
@@ -812,18 +812,26 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
                        }
 <St_Para>({BLANK}*\n)+{BLANK}*\n{BLANK}* {
                          lineCount(yytext,yyleng);
-                         g_token->indent=computeIndent(yytext,(int)yyleng);
-                         int i;
-                         // put back the indentation (needed for list items)
-                         for (i=0;i<g_token->indent;i++)
+                         if (g_insidePre)
                          {
-                           unput(' ');
+                           g_token->chars=yytext;
+                           return TK_WHITESPACE;
                          }
-                         // tell flex that after putting the last indent
-                         // back we are at the beginning of the line
-                         YY_CURRENT_BUFFER->yy_at_bol=1;
-                         // start of a new paragraph
-                         return TK_NEWPARA;
+                         else
+                         {
+                           g_token->indent=computeIndent(yytext,(int)yyleng);
+                           int i;
+                           // put back the indentation (needed for list items)
+                           for (i=0;i<g_token->indent;i++)
+                           {
+                             unput(' ');
+                           }
+                           // tell flex that after putting the last indent
+                           // back we are at the beginning of the line
+                           YY_CURRENT_BUFFER->yy_at_bol=1;
+                           // start of a new paragraph
+                           return TK_NEWPARA;
+                         }
                        }
 <St_CodeOpt>{BLANK}*"{"(".")?{LABELID}"}" {
                          g_token->name = yytext;
@@ -834,7 +842,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
 <St_CodeOpt>"\\ilinebr" |
 <St_CodeOpt>\n         |
 <St_CodeOpt>.          {
-                         for (int i=yyleng-1;i>=0;i--) unput(yytext[i]);
+                         unput_string(yytext,yyleng);
                          BEGIN(St_Code);
                        }
 <St_Code>{WS}*{CMD}"endcode" {
@@ -860,7 +868,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
                          BEGIN(St_HtmlOnly);
                         }
 <St_HtmlOnlyOption>"\\ilinebr" {
-                         for (int i=yyleng-1;i>=0;i--) unput(yytext[i]);
+                         unput_string(yytext,yyleng);
                          BEGIN(St_HtmlOnly);
                         }
 <St_HtmlOnly>{CMD}"endhtmlonly" {
@@ -971,7 +979,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
 <St_PlantUMLOpt>"\n"   |
 <St_PlantUMLOpt>.      {
                          g_token->sectionId = "";
-                         for (int i=yyleng-1;i>=0;i--) unput(yytext[i]);
+                         unput_string(yytext,yyleng);
                          return RetVal_OK;
                        }
 <St_PlantUML>{CMD}"enduml"  {
@@ -999,7 +1007,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
                          return 0;
                        }
 <St_Title>"\\ilinebr"  {
-                         for (int i=yyleng-1;i>=0;i--) unput(yytext[i]);
+                         unput_string(yytext,yyleng);
                          return 0;
                        }
 <St_TitleN>"&"{ID}";"  { /* symbol */
@@ -1014,7 +1022,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
                          return 0;
                        }
 <St_TitleN>"\\ilinebr" { /* new line => end of title */
-                         for (int i=yyleng-1;i>=0;i--) unput(yytext[i]);
+                         unput_string(yytext,yyleng);
                          return 0;
                        }
 <St_TitleN>{SPCMD1}    |
@@ -1049,7 +1057,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
                          return TK_SYMBOL;
                        }
 <St_TitleQ>(\n|"\\ilinebr") { /* new line => end of title */
-                         for (int i=yyleng-1;i>=0;i--) unput(yytext[i]);
+                         unput_string(yytext,yyleng);
                          return 0;
                        }
 <St_TitleQ>{SPCMD1}    |
@@ -1087,7 +1095,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
                          return 0;
                        }
 <St_TitleV,St_TitleA>(\n|"\\ilinebr") {
-                         for (int i=yyleng-1;i>=0;i--) unput(yytext[i]);
+                         unput_string(yytext,yyleng);
                          return 0;
                        }
 
@@ -1117,7 +1125,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
                          return 0;
                        }
 <St_Cite>(\n|"\\ilinebr")  { // new line
-                         for (int i=yyleng-1;i>=0;i--) unput(yytext[i]);
+                         unput_string(yytext,yyleng);
                          return 0;
                        }
 <St_Cite>.             { // any other character
@@ -1145,7 +1153,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
                          BEGIN(St_Ref2);
                        }
 <St_Ref>(\n|"\\ilinebr") { // new line
-                         for (int i=yyleng-1;i>=0;i--) unput(yytext[i]);
+                         unput_string(yytext,yyleng);
                          return 0;
                        }
 <St_Ref>.              { // any other character

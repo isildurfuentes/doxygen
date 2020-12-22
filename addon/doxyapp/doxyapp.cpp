@@ -38,6 +38,7 @@
 #include "classlist.h"
 #include "config.h"
 #include "filename.h"
+#include "version.h"
 
 class XRefDummyCodeGenerator : public CodeOutputInterface
 {
@@ -148,25 +149,9 @@ static void listSymbol(Definition *d)
 
 static void listSymbols()
 {
-  QDictIterator<DefinitionIntf> sli(*Doxygen::symbolMap);
-  DefinitionIntf *di;
-  for (sli.toFirst();(di=sli.current());++sli)
+  for (const auto &kv : Doxygen::symbolMap)
   {
-    if (di->definitionType()==DefinitionIntf::TypeSymbolList) // list of symbols
-      // with same name
-    {
-      DefinitionListIterator dli(*(DefinitionList*)di);
-      Definition *d;
-      // for each symbol
-      for (dli.toFirst();(d=dli.current());++dli)
-      {
-        listSymbol(d);
-      }
-    }
-    else // single symbol
-    {
-      listSymbol((Definition*)di);
-    }
+    listSymbol(kv.second);
   }
 }
 
@@ -201,8 +186,8 @@ static void lookupSymbol(Definition *d)
       case Definition::TypeNamespace:
         {
           NamespaceDef *nd = dynamic_cast<NamespaceDef*>(d);
-          printf("Kind: Namespace: contains %d classes and %d namespaces\n",
-              nd->getClassSDict() ? nd->getClassSDict()->count() : 0,
+          printf("Kind: Namespace: contains %zu classes and %d namespaces\n",
+              nd->getClasses().size(),
               nd->getNamespaceSDict() ? nd->getNamespaceSDict()->count() : 0);
         }
         break;
@@ -223,25 +208,14 @@ static void lookupSymbols(const QCString &sym)
 {
   if (!sym.isEmpty())
   {
-    DefinitionIntf *di = Doxygen::symbolMap->find(sym);
-    if (di)
+    auto range = Doxygen::symbolMap.find(sym);
+    bool found=false;
+    for (auto it=range.first; it!=range.second; ++it)
     {
-      if (di->definitionType()==DefinitionIntf::TypeSymbolList)
-      {
-        DefinitionListIterator dli(*(DefinitionList*)di);
-        Definition *d;
-        // for each symbol with the given name
-        for (dli.toFirst();(d=dli.current());++dli)
-        {
-          lookupSymbol(d);
-        }
-      }
-      else
-      {
-        lookupSymbol((Definition*)di);
-      }
+      lookupSymbol(it->second);
+      found=true;
     }
-    else
+    if (!found)
     {
       printf("Unknown symbol\n");
     }
@@ -252,7 +226,23 @@ int main(int argc,char **argv)
 {
   char cmd[256];
 
-  if (argc<2)
+  int locArgc = argc;
+
+  if (locArgc == 2)
+  {
+    if (!strcmp(argv[1],"--help"))
+    {
+      printf("Usage: %s [source_file | source_dir]\n",argv[0]);
+      exit(0);
+    }
+    else if (!strcmp(argv[1],"--version"))
+    {
+      printf("%s version: %s\n",argv[0],getFullVersion());
+      exit(0);
+    }
+  }
+
+  if (locArgc!=2)
   {
     printf("Usage: %s [source_file | source_dir]\n",argv[0]);
     exit(1);

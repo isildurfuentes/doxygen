@@ -355,7 +355,7 @@ function SearchBox(name, resultsPath, inFrame, label, extension)
     }
     else // nothing available for this search term
     {
-       resultsPage = this.resultsPath + '/nomatches.html';
+       resultsPage = this.resultsPath + '/nomatches' + this.extension;
        resultsPageWithSearch = resultsPage;
        hasResultsPage = false;
     }
@@ -441,12 +441,12 @@ function SearchResults(name)
 
       while (element && element!=parentElement)
       {
-        if (element.nodeName == 'DIV' && element.className == 'SRChildren')
+        if (element.nodeName == 'div' && element.className == 'SRChildren')
         {
           return element;
         }
 
-        if (element.nodeName == 'DIV' && element.hasChildNodes())
+        if (element.nodeName == 'div' && element.hasChildNodes())
         {
            element = element.firstChild;
         }

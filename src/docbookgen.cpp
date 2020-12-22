@@ -101,9 +101,21 @@ inline void writeDocbookCodeString(FTextStream &t,const char *s, int &col)
       case '&':  t << "&amp;"; col++;  break;
       case '\'': t << "&apos;"; col++; break;
       case '"':  t << "&quot;"; col++; break;
-      case '\007':  t << "^G"; col++; break; // bell
-      case '\014':  t << "^L"; col++; break; // form feed
-      default:   t << c; col++;        break;
+      default:
+        {
+          uchar uc = static_cast<uchar>(c);
+          static const char *hex="0123456789ABCDEF";
+          if (uc<32)
+          {
+            t << "&#x24" << hex[uc>>4] << hex[uc&0xF] << ";";
+          }
+          else
+          {
+            t << c;
+          }
+          col++;
+        }
+        break;
     }
   }
 }
@@ -296,7 +308,7 @@ void DocbookGenerator::init()
   createSubDirs(d);
 }
 
-void DocbookGenerator::startFile(const char *name,const char *,const char *)
+void DocbookGenerator::startFile(const char *name,const char *,const char *,int)
 {
 DB_GEN_C
   QCString fileName=name;
@@ -525,7 +537,7 @@ DB_GEN_C2("IndexSections " << is)
         bool found=FALSE;
         for (nli.toFirst();(nd=nli.current()) && !found;++nli)
         {
-          if (nd->isLinkableInProject())
+          if (nd->isLinkableInProject() && !nd->isAlias())
           {
             t << "<xi:include href=\"" << nd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
             found=TRUE;
@@ -533,7 +545,7 @@ DB_GEN_C2("IndexSections " << is)
         }
         while ((nd=nli.current()))
         {
-          if (nd->isLinkableInProject())
+          if (nd->isLinkableInProject() && !nd->isAlias())
           {
             t << "<xi:include href=\"" << nd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
           }
@@ -545,25 +557,12 @@ DB_GEN_C2("IndexSections " << is)
     case isClassDocumentation:
       {
         t << "</title>" << endl;
-        ClassSDict::Iterator cli(*Doxygen::classSDict);
-        const ClassDef *cd=0;
-        bool found=FALSE;
-        for (cli.toFirst();(cd=cli.current()) && !found;++cli)
+        for (const auto &cd : *Doxygen::classLinkedMap)
         {
           if (cd->isLinkableInProject() &&
               cd->templateMaster()==0 &&
-             !cd->isEmbeddedInOuterScope()
-             )
-          {
-            t << "    <xi:include href=\"" << cd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
-            found=TRUE;
-          }
-        }
-        for (;(cd=cli.current());++cli)
-        {
-          if (cd->isLinkableInProject() &&
-              cd->templateMaster()==0 &&
-             !cd->isEmbeddedInOuterScope()
+             !cd->isEmbeddedInOuterScope() &&
+             !cd->isAlias()
              )
           {
             t << "    <xi:include href=\"" << cd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
@@ -654,7 +653,7 @@ DB_GEN_C
   }
 }
 
-void DocbookGenerator::writeDoc(DocNode *n,const Definition *,const MemberDef *)
+void DocbookGenerator::writeDoc(DocNode *n,const Definition *,const MemberDef *,int)
 {
 DB_GEN_C
   DocbookDocVisitor *visitor =

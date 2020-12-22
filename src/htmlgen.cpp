@@ -60,6 +60,7 @@ static QCString g_header;
 static QCString g_footer;
 static QCString g_mathjax_code;
 static QCString g_latex_macro;
+static const char *hex="0123456789ABCDEF";
 
 // note: this is only active if DISABLE_INDEX=YES, if DISABLE_INDEX is disabled, this
 // part will be rendered inside menu.js
@@ -672,9 +673,21 @@ void HtmlCodeGenerator::codify(const char *str)
                      m_t << "\\";
                    m_col++;
                    break;
-        default:   p=writeUtf8Char(m_t,p-1);
-                   m_col++;
-                   break;
+        default:
+          {
+            uchar uc = static_cast<uchar>(c);
+            if (uc<32)
+            {
+              m_t << "&#x24" << hex[uc>>4] << hex[uc&0xF] << ";";
+              m_col++;
+            }
+            else
+            {
+              p=writeUtf8Char(m_t,p-1);
+              m_col++;
+            }
+          }
+          break;
       }
     }
   }
@@ -698,18 +711,30 @@ void HtmlCodeGenerator::docify(const char *str)
         case '&':  m_t << "&amp;"; break;
         case '"':  m_t << "&quot;"; break;
         case '\\':
-                   if (*p=='<')
-                     { m_t << "&lt;"; p++; }
-                   else if (*p=='>')
-                     { m_t << "&gt;"; p++; }
-		   else if (*p=='(')
-                     { m_t << "\\&zwj;("; p++; }
-                   else if (*p==')')
-                     { m_t << "\\&zwj;)"; p++; }
-                   else
-                     m_t << "\\";
-                   break;
-        default:   m_t << c;
+          if (*p=='<')
+            { m_t << "&lt;"; p++; }
+          else if (*p=='>')
+            { m_t << "&gt;"; p++; }
+	  else if (*p=='(')
+            { m_t << "\\&zwj;("; p++; }
+          else if (*p==')')
+            { m_t << "\\&zwj;)"; p++; }
+          else
+            m_t << "\\";
+          break;
+        default:
+          {
+            uchar uc = static_cast<uchar>(c);
+            if (uc<32 && !isspace(c))
+            {
+              m_t << "&#x24" << hex[uc>>4] << hex[uc&0xF] << ";";
+            }
+            else
+            {
+              m_t << c;
+            }
+          }
+          break;
       }
     }
   }
@@ -1130,7 +1155,7 @@ void HtmlGenerator::writeFooterFile(QFile &file)
 static std::mutex g_indexLock;
 
 void HtmlGenerator::startFile(const char *name,const char *,
-                              const char *title)
+                              const char *title,int id)
 {
   //printf("HtmlGenerator::startFile(%s)\n",name);
   m_relPath = relativePathToRoot(name);
@@ -1138,6 +1163,7 @@ void HtmlGenerator::startFile(const char *name,const char *,
   m_lastTitle=title;
 
   startPlainFile(fileName);
+  m_codeGen.setId(id);
   m_codeGen.setTextStream(t);
   m_codeGen.setRelativePath(m_relPath);
   {
@@ -1209,7 +1235,7 @@ QCString HtmlGenerator::writeLogoAsString(const char *path)
   {
     result += theTranslator->trGeneratedBy();
   }
-  result += "&#160;\n<a href=\"http://www.doxygen.org/index.html\">\n"
+  result += "&#160;\n<a href=\"https://www.doxygen.org/index.html\">\n"
             "<img class=\"footer\" src=\"";
   result += path;
   result += "doxygen.svg\" width=\"104\" height=\"31\" alt=\"doxygen\"/></a> ";
@@ -1231,9 +1257,6 @@ void HtmlGenerator::writePageFooter(FTextStream &t,const QCString &lastTitle,
 
 void HtmlGenerator::writeFooter(const char *navPath)
 {
-  // Currently only tooltips in HTML
-  TooltipManager::instance()->writeTooltips(m_codeGen);
-
   writePageFooter(t,m_lastTitle,m_relPath,navPath);
 }
 
@@ -2241,8 +2264,9 @@ void HtmlGenerator::endParamList()
   t << "</dl>";
 }
 
-void HtmlGenerator::writeDoc(DocNode *n,const Definition *ctx,const MemberDef *)
+void HtmlGenerator::writeDoc(DocNode *n,const Definition *ctx,const MemberDef *,int id)
 {
+  m_codeGen.setId(id);
   HtmlDocVisitor *visitor = new HtmlDocVisitor(t,m_codeGen,ctx);
   n->accept(visitor);
   delete visitor;

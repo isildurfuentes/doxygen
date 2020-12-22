@@ -23,10 +23,11 @@
 #include "sortdict.h"
 #include "definition.h"
 #include "dirdef.h"
+#include "layout.h"
 
 class MemberList;
 class FileList;
-class ClassSDict;
+class ClassLinkedRefMap;
 class FileDef;
 class ClassDef;
 class NamespaceDef;
@@ -43,7 +44,7 @@ class MemberDef;
 class FTextStream;
 
 /** A model of a group of symbols. */
-class GroupDef : virtual public Definition
+class GroupDef : public DefinitionMutable, public Definition
 {
   public:
    ~GroupDef() {}
@@ -69,7 +70,7 @@ class GroupDef : virtual public Definition
     virtual void writeMemberPages(OutputList &ol) = 0;
     virtual void writeQuickMemberLinks(OutputList &ol,const MemberDef *currentMd) const = 0;
     virtual void writeTagFile(FTextStream &) = 0;
-    virtual int  numDocMembers() const = 0;
+    virtual size_t numDocMembers() const = 0;
     virtual bool isLinkableInProject() const = 0;
     virtual bool isLinkable() const = 0;
     virtual bool isASubGroup() const = 0;
@@ -94,7 +95,7 @@ class GroupDef : virtual public Definition
     virtual MemberGroupSDict *getMemberGroupSDict() const = 0;
 
     virtual FileList *      getFiles() const = 0;
-    virtual ClassSDict *    getClasses() const = 0;
+    virtual ClassLinkedRefMap getClasses() const = 0;
     virtual NamespaceSDict * getNamespaces() const = 0;
     virtual GroupList *     getSubGroups() const = 0;
     virtual PageSDict *     getPages() const = 0;
@@ -107,6 +108,14 @@ class GroupDef : virtual public Definition
 
 GroupDef *createGroupDef(const char *fileName,int line,const char *name,
                                 const char *title,const char *refFileName=0);
+
+// --- Cast functions
+
+GroupDef            *toGroupDef(Definition *d);
+const GroupDef      *toGroupDef(const Definition *d);
+
+// ------------------
+
 
 /** A sorted dictionary of GroupDef objects. */
 class GroupSDict : public SDict<GroupDef>

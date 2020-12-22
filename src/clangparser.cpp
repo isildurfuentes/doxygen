@@ -25,7 +25,7 @@
 
 //--------------------------------------------------------------------------
 
-std::mutex g_clangMutex;
+static std::mutex g_clangMutex;
 
 ClangParser *ClangParser::instance()
 {
@@ -38,6 +38,8 @@ ClangParser *ClangParser::s_instance = 0;
 
 //--------------------------------------------------------------------------
 #if USE_LIBCLANG
+
+static std::mutex g_docCrossReferenceMutex;
 
 enum class DetectedLang { Cpp, ObjC, ObjCpp };
 
@@ -572,7 +574,7 @@ void ClangTUParser::writeMultiLineCodeLink(CodeOutputInterface &ol,
                   const char *text)
 {
   static bool sourceTooltips = Config_getBool(SOURCE_TOOLTIPS);
-  TooltipManager::instance()->addTooltip(d);
+  TooltipManager::instance().addTooltip(ol,d);
   QCString ref  = d->getReference();
   QCString file = d->getOutputFileBase();
   QCString anchor = d->anchor();
@@ -695,7 +697,8 @@ void ClangTUParser::linkIdentifier(CodeOutputInterface &ol,FileDef *fd,
         p->currentMemberDef && d->definitionType()==Definition::TypeMember &&
         (p->currentMemberDef!=d || p->currentLine<line)) // avoid self-reference
     {
-      addDocCrossReference(p->currentMemberDef,dynamic_cast<MemberDef *>(d));
+      std::lock_guard<std::mutex> lock(g_docCrossReferenceMutex);
+      addDocCrossReference(toMemberDefMutable(p->currentMemberDef),toMemberDefMutable(d));
     }
     writeMultiLineCodeLink(ol,fd,line,column,d,text);
   }

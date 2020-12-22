@@ -29,6 +29,7 @@
 #include "memberlist.h"
 #include "define.h"
 #include "cache.h"
+#include "symbolmap.h"
 
 #define THREAD_LOCAL thread_local
 #define AtomicInt    std::atomic_int
@@ -48,13 +49,12 @@ class GroupDef;
 class GroupSDict;
 class FileDef;
 class ClassDef;
-class ClassSDict;
+class ClassLinkedMap;
 class GenericsSDict;
 class MemberNameLinkedMap;
 class FileNameLinkedMap;
 class NamespaceSDict;
 class NamespaceDef;
-class DefinitionIntf;
 class DirSDict;
 class DirRelation;
 class IndexList;
@@ -63,11 +63,10 @@ class FormulaDict;
 class FormulaNameDict;
 class Preprocessor;
 struct MemberGroupInfo;
+class NamespaceDefMutable;
 
 typedef QList<QCString>    StringList;
 typedef QListIterator<QCString>    StringListIterator;
-//typedef QDict<FileDef>     FileDict;
-//typedef QDict<GroupDef>    GroupDict;
 
 class StringDict : public QDict<QCString>
 {
@@ -96,8 +95,8 @@ extern QCString g_spaces;
 class Doxygen
 {
   public:
-    static ClassSDict               *classSDict;
-    static ClassSDict               *hiddenClasses;
+    static ClassLinkedMap           *classLinkedMap;
+    static ClassLinkedMap           *hiddenClassLinkedMap;
     static PageSDict                *exampleSDict;
     static PageSDict                *pageSDict;
     static PageDef                  *mainPage;
@@ -119,11 +118,11 @@ class Doxygen
     static StringDict                aliasDict;
     static QIntDict<MemberGroupInfo> memGrpInfoDict;
     static StringUnorderedSet        expandAsDefinedSet;
-    static NamespaceDef             *globalScope;
+    static NamespaceDefMutable      *globalScope;
     static QCString                  htmlFileExtension;
     static bool                      parseSourcesNeeded;
     static SearchIndexIntf          *searchIndex;
-    static QDict<DefinitionIntf>    *symbolMap;
+    static SymbolMap<Definition>     symbolMap;
     static QDict<Definition>        *clangUsrMap;
     static bool                      outputToWizard;
     static QDict<int>               *htmlDirMap;
@@ -140,7 +139,6 @@ class Doxygen
     static int                       subpageNestingLevel;
     static QCString                  spaces;
     static bool                      generatingXmlOutput;
-    static GenericsSDict            *genericsDict;
     static DefinesPerFileList        macroDefinitions;
     static bool                      clangAssistedParsing;
 };

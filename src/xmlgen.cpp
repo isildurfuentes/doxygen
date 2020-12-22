@@ -1021,23 +1021,15 @@ static void generateXMLForMember(const MemberDef *md,FTextStream &ti,FTextStream
   }
 
   //printf("md->getReferencesMembers()=%p\n",md->getReferencesMembers());
-  MemberSDict *mdict = md->getReferencesMembers();
-  if (mdict)
+  auto refList = md->getReferencesMembers();
+  for (const auto &refmd : refList)
   {
-    MemberSDict::Iterator mdi(*mdict);
-    for (mdi.toFirst();(rmd=mdi.current());++mdi)
-    {
-      writeMemberReference(t,def,rmd,"references");
-    }
+    writeMemberReference(t,def,refmd,"references");
   }
-  mdict = md->getReferencedByMembers();
-  if (mdict)
+  auto refByList = md->getReferencedByMembers();
+  for (const auto &refmd : refByList)
   {
-    MemberSDict::Iterator mdi(*mdict);
-    for (mdi.toFirst();(rmd=mdi.current());++mdi)
-    {
-      writeMemberReference(t,def,rmd,"referencedby");
-    }
+    writeMemberReference(t,def,refmd,"referencedby");
   }
 
   t << "      </memberdef>" << endl;
@@ -1132,27 +1124,22 @@ static void writeListOfAllMembers(const ClassDef *cd,FTextStream &t)
   t << "    </listofallmembers>" << endl;
 }
 
-static void writeInnerClasses(const ClassSDict *cl,FTextStream &t)
+static void writeInnerClasses(const ClassLinkedRefMap &cl,FTextStream &t)
 {
-  if (cl)
+  for (const auto &cd : cl)
   {
-    ClassSDict::Iterator cli(*cl);
-    const ClassDef *cd;
-    for (cli.toFirst();(cd=cli.current());++cli)
+    if (!cd->isHidden() && !cd->isAnonymous())
     {
-      if (!cd->isHidden() && !cd->isAnonymous())
+      t << "    <innerclass refid=\"" << classOutputFileBase(cd)
+        << "\" prot=\"";
+      switch(cd->protection())
       {
-        t << "    <innerclass refid=\"" << classOutputFileBase(cd)
-          << "\" prot=\"";
-        switch(cd->protection())
-        {
-           case Public:    t << "public";     break;
-           case Protected: t << "protected";  break;
-           case Private:   t << "private";    break;
-           case Package:   t << "package";    break;
-        }
-        t << "\">" << convertToXML(cd->name()) << "</innerclass>" << endl;
+         case Public:    t << "public";     break;
+         case Protected: t << "protected";  break;
+         case Private:   t << "private";    break;
+         case Package:   t << "package";    break;
       }
+      t << "\">" << convertToXML(cd->name()) << "</innerclass>" << endl;
     }
   }
 }
@@ -1294,73 +1281,63 @@ static void generateXMLForClass(const ClassDef *cd,FTextStream &ti)
   t << "    <compoundname>";
   writeXMLString(t,cd->name());
   t << "</compoundname>" << endl;
-  if (cd->baseClasses())
+  for (const auto &bcd : cd->baseClasses())
   {
-    BaseClassListIterator bcli(*cd->baseClasses());
-    BaseClassDef *bcd;
-    for (bcli.toFirst();(bcd=bcli.current());++bcli)
+    t << "    <basecompoundref ";
+    if (bcd.classDef->isLinkable())
     {
-      t << "    <basecompoundref ";
-      if (bcd->classDef->isLinkable())
-      {
-        t << "refid=\"" << classOutputFileBase(bcd->classDef) << "\" ";
-      }
-      t << "prot=\"";
-      switch (bcd->prot)
-      {
-        case Public:    t << "public";    break;
-        case Protected: t << "protected"; break;
-        case Private:   t << "private";   break;
-        case Package: ASSERT(0); break;
-      }
-      t << "\" virt=\"";
-      switch(bcd->virt)
-      {
-        case Normal:  t << "non-virtual";  break;
-        case Virtual: t << "virtual";      break;
-        case Pure:    t <<"pure-virtual"; break;
-      }
-      t << "\">";
-      if (!bcd->templSpecifiers.isEmpty())
-      {
-        t << convertToXML(
-              insertTemplateSpecifierInScope(
-              bcd->classDef->name(),bcd->templSpecifiers)
-           );
-      }
-      else
-      {
-        t << convertToXML(bcd->classDef->displayName());
-      }
-      t  << "</basecompoundref>" << endl;
+      t << "refid=\"" << classOutputFileBase(bcd.classDef) << "\" ";
     }
+    t << "prot=\"";
+    switch (bcd.prot)
+    {
+      case Public:    t << "public";    break;
+      case Protected: t << "protected"; break;
+      case Private:   t << "private";   break;
+      case Package: ASSERT(0); break;
+    }
+    t << "\" virt=\"";
+    switch(bcd.virt)
+    {
+      case Normal:  t << "non-virtual";  break;
+      case Virtual: t << "virtual";      break;
+      case Pure:    t <<"pure-virtual"; break;
+    }
+    t << "\">";
+    if (!bcd.templSpecifiers.isEmpty())
+    {
+      t << convertToXML(
+          insertTemplateSpecifierInScope(
+            bcd.classDef->name(),bcd.templSpecifiers)
+          );
+    }
+    else
+    {
+      t << convertToXML(bcd.classDef->displayName());
+    }
+    t  << "</basecompoundref>" << endl;
   }
-  if (cd->subClasses())
+  for (const auto &bcd : cd->subClasses())
   {
-    BaseClassListIterator bcli(*cd->subClasses());
-    BaseClassDef *bcd;
-    for (bcli.toFirst();(bcd=bcli.current());++bcli)
+    t << "    <derivedcompoundref refid=\""
+      << classOutputFileBase(bcd.classDef)
+      << "\" prot=\"";
+    switch (bcd.prot)
     {
-      t << "    <derivedcompoundref refid=\""
-        << classOutputFileBase(bcd->classDef)
-        << "\" prot=\"";
-      switch (bcd->prot)
-      {
-        case Public:    t << "public";    break;
-        case Protected: t << "protected"; break;
-        case Private:   t << "private";   break;
-        case Package: ASSERT(0); break;
-      }
-      t << "\" virt=\"";
-      switch(bcd->virt)
-      {
-        case Normal:  t << "non-virtual";  break;
-        case Virtual: t << "virtual";      break;
-        case Pure:    t << "pure-virtual"; break;
-      }
-      t << "\">" << convertToXML(bcd->classDef->displayName())
-        << "</derivedcompoundref>" << endl;
+      case Public:    t << "public";    break;
+      case Protected: t << "protected"; break;
+      case Private:   t << "private";   break;
+      case Package: ASSERT(0); break;
     }
+    t << "\" virt=\"";
+    switch (bcd.virt)
+    {
+      case Normal:  t << "non-virtual";  break;
+      case Virtual: t << "virtual";      break;
+      case Pure:    t << "pure-virtual"; break;
+    }
+    t << "\">" << convertToXML(bcd.classDef->displayName())
+      << "</derivedcompoundref>" << endl;
   }
 
   IncludeInfo *ii=cd->includeInfo();
@@ -1381,7 +1358,7 @@ static void generateXMLForClass(const ClassDef *cd,FTextStream &ti)
     }
   }
 
-  writeInnerClasses(cd->getClassSDict(),t);
+  writeInnerClasses(cd->getClasses(),t);
 
   writeTemplateList(cd,t);
   if (cd->getMemberGroupSDict())
@@ -1485,7 +1462,7 @@ static void generateXMLForNamespace(const NamespaceDef *nd,FTextStream &ti)
   writeXMLString(t,nd->name());
   t << "</compoundname>" << endl;
 
-  writeInnerClasses(nd->getClassSDict(),t);
+  writeInnerClasses(nd->getClasses(),t);
   writeInnerNamespaces(nd->getNamespaceSDict(),t);
 
   if (nd->getMemberGroupSDict())
@@ -1616,10 +1593,7 @@ static void generateXMLForFile(FileDef *fd,FTextStream &ti)
     t << "    </invincdepgraph>" << endl;
   }
 
-  if (fd->getClassSDict())
-  {
-    writeInnerClasses(fd->getClassSDict(),t);
-  }
+  writeInnerClasses(fd->getClasses(),t);
   if (fd->getNamespaceSDict())
   {
     writeInnerNamespaces(fd->getNamespaceSDict(),t);
@@ -1983,23 +1957,10 @@ void generateXML()
   t << "xml:lang=\"" << theTranslator->trISOLang() << "\"";
   t << ">" << endl;
 
+  for (const auto &cd : *Doxygen::classLinkedMap)
   {
-    ClassSDict::Iterator cli(*Doxygen::classSDict);
-    const ClassDef *cd;
-    for (cli.toFirst();(cd=cli.current());++cli)
-    {
-      generateXMLForClass(cd,t);
-    }
+    generateXMLForClass(cd.get(),t);
   }
-  //{
-  //  ClassSDict::Iterator cli(Doxygen::hiddenClasses);
-  //  ClassDef *cd;
-  //  for (cli.toFirst();(cd=cli.current());++cli)
-  //  {
-  //    msg("Generating XML output for class %s\n",cd->name().data());
-  //    generateXMLForClass(cd,t);
-  //  }
-  //}
   NamespaceSDict::Iterator nli(*Doxygen::namespaceSDict);
   const NamespaceDef *nd;
   for (nli.toFirst();(nd=nli.current());++nli)

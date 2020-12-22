@@ -1264,13 +1264,9 @@ I think the hurdles are:
   inner_refid (unless I'm missing a method that would uniformly return
   the correct refid for all types).
 */
-static void writeInnerClasses(const ClassSDict *cl, struct Refid outer_refid)
+static void writeInnerClasses(const ClassLinkedRefMap &cl, struct Refid outer_refid)
 {
-  if (!cl) return;
-
-  ClassSDict::Iterator cli(*cl);
-  const ClassDef *cd;
-  for (cli.toFirst();(cd=cli.current());++cli)
+  for (const auto &cd : cl)
   {
     if (!cd->isHidden() && !cd->isAnonymous())
     {
@@ -1421,7 +1417,7 @@ QCString getSQLDocBlock(const Definition *scope,
     fileName,
     lineNr,
     const_cast<Definition*>(scope),
-    dynamic_cast<const MemberDef*>(def),
+    toMemberDef(def),
     doc,
     FALSE,
     FALSE,
@@ -1619,26 +1615,16 @@ static void generateSqlite3ForMember(const MemberDef *md, struct Refid scope_ref
     // + source references
     // The cross-references in initializers only work when both the src and dst
     // are defined.
-    MemberSDict *mdict = md->getReferencesMembers();
-    if (mdict!=0)
+    auto refList = md->getReferencesMembers();
+    for (const auto &rmd : refList)
     {
-      MemberSDict::IteratorDict mdi(*mdict);
-      const MemberDef *rmd;
-      for (mdi.toFirst();(rmd=mdi.current());++mdi)
-      {
-        insertMemberReference(md,rmd, "inline");
-      }
+      insertMemberReference(md,rmd, "inline");
     }
     // + source referenced by
-    mdict = md->getReferencedByMembers();
-    if (mdict!=0)
+    auto refByList = md->getReferencedByMembers();
+    for (const auto &rmd : refByList)
     {
-      MemberSDict::IteratorDict mdi(*mdict);
-      const MemberDef *rmd;
-      for (mdi.toFirst();(rmd=mdi.current());++mdi)
-      {
-        insertMemberReference(rmd,md, "inline");
-      }
+      insertMemberReference(rmd,md, "inline");
     }
     return;
   }
@@ -1856,24 +1842,16 @@ static void generateSqlite3ForMember(const MemberDef *md, struct Refid scope_ref
   // + source references
   // The cross-references in initializers only work when both the src and dst
   // are defined.
-  MemberSDict *mdict = md->getReferencesMembers();
-  if (mdict!=0)
+  auto refList = md->getReferencesMembers();
+  for (const auto &refmd : refList)
   {
-    MemberSDict::IteratorDict mdi(*mdict);
-    for (mdi.toFirst();(rmd=mdi.current());++mdi)
-    {
-      insertMemberReference(md,rmd, "inline");
-    }
+    insertMemberReference(md,refmd, "inline");
   }
   // + source referenced by
-  mdict = md->getReferencedByMembers();
-  if (mdict!=0)
+  auto refByList = md->getReferencedByMembers();
+  for (const auto &refmd : refByList)
   {
-    MemberSDict::IteratorDict mdi(*mdict);
-    for (mdi.toFirst();(rmd=mdi.current());++mdi)
-    {
-      insertMemberReference(rmd,md, "inline");
-    }
+    insertMemberReference(refmd,md, "inline");
   }
 }
 
@@ -2012,41 +1990,31 @@ static void generateSqlite3ForClass(const ClassDef *cd)
   step(compounddef_insert);
 
   // + list of direct super classes
-  if (cd->baseClasses())
+  for (const auto &bcd : cd->baseClasses())
   {
-    BaseClassListIterator bcli(*cd->baseClasses());
-    const BaseClassDef *bcd;
-    for (bcli.toFirst();(bcd=bcli.current());++bcli)
-    {
-      struct Refid base_refid = insertRefid(bcd->classDef->getOutputFileBase());
-      struct Refid derived_refid = insertRefid(cd->getOutputFileBase());
-      bindIntParameter(compoundref_insert,":base_rowid", base_refid.rowid);
-      bindIntParameter(compoundref_insert,":derived_rowid", derived_refid.rowid);
-      bindIntParameter(compoundref_insert,":prot",bcd->prot);
-      bindIntParameter(compoundref_insert,":virt",bcd->virt);
-      step(compoundref_insert);
-    }
+    struct Refid base_refid = insertRefid(bcd.classDef->getOutputFileBase());
+    struct Refid derived_refid = insertRefid(cd->getOutputFileBase());
+    bindIntParameter(compoundref_insert,":base_rowid", base_refid.rowid);
+    bindIntParameter(compoundref_insert,":derived_rowid", derived_refid.rowid);
+    bindIntParameter(compoundref_insert,":prot",bcd.prot);
+    bindIntParameter(compoundref_insert,":virt",bcd.virt);
+    step(compoundref_insert);
   }
 
   // + list of direct sub classes
-  if (cd->subClasses())
+  for (const auto &bcd : cd->subClasses())
   {
-    BaseClassListIterator bcli(*cd->subClasses());
-    const BaseClassDef *bcd;
-    for (bcli.toFirst();(bcd=bcli.current());++bcli)
-    {
-      struct Refid derived_refid = insertRefid(bcd->classDef->getOutputFileBase());
-      struct Refid base_refid = insertRefid(cd->getOutputFileBase());
-      bindIntParameter(compoundref_insert,":base_rowid", base_refid.rowid);
-      bindIntParameter(compoundref_insert,":derived_rowid", derived_refid.rowid);
-      bindIntParameter(compoundref_insert,":prot",bcd->prot);
-      bindIntParameter(compoundref_insert,":virt",bcd->virt);
-      step(compoundref_insert);
-    }
+    struct Refid derived_refid = insertRefid(bcd.classDef->getOutputFileBase());
+    struct Refid base_refid = insertRefid(cd->getOutputFileBase());
+    bindIntParameter(compoundref_insert,":base_rowid", base_refid.rowid);
+    bindIntParameter(compoundref_insert,":derived_rowid", derived_refid.rowid);
+    bindIntParameter(compoundref_insert,":prot",bcd.prot);
+    bindIntParameter(compoundref_insert,":virt",bcd.virt);
+    step(compoundref_insert);
   }
 
   // + list of inner classes
-  writeInnerClasses(cd->getClassSDict(),refid);
+  writeInnerClasses(cd->getClasses(),refid);
 
   // + template argument list(s)
   writeTemplateList(cd);
@@ -2110,7 +2078,7 @@ static void generateSqlite3ForNamespace(const NamespaceDef *nd)
   step(compounddef_insert);
 
   // + contained class definitions
-  writeInnerClasses(nd->getClassSDict(),refid);
+  writeInnerClasses(nd->getClasses(),refid);
 
   // + contained namespace definitions
   writeInnerNamespaces(nd->getNamespaceSDict(),refid);
@@ -2272,10 +2240,7 @@ static void generateSqlite3ForFile(const FileDef *fd)
   }
 
   // + contained class definitions
-  if (fd->getClassSDict())
-  {
-    writeInnerClasses(fd->getClassSDict(),refid);
-  }
+  writeInnerClasses(fd->getClasses(),refid);
 
   // + contained namespace definitions
   if (fd->getNamespaceSDict())
@@ -2583,12 +2548,10 @@ void generateSqlite3()
   recordMetadata();
 
   // + classes
-  ClassSDict::Iterator cli(*Doxygen::classSDict);
-  const ClassDef *cd;
-  for (cli.toFirst();(cd=cli.current());++cli)
+  for (const auto &cd : *Doxygen::classLinkedMap)
   {
     msg("Generating Sqlite3 output for class %s\n",cd->name().data());
-    generateSqlite3ForClass(cd);
+    generateSqlite3ForClass(cd.get());
   }
 
   // + namespaces

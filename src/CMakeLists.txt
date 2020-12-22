@@ -122,6 +122,7 @@ set(LEX_FILES scanner
     commentcnv
     commentscan
     constexp
+    xml
     xmlcode
     sqlcode
     configimpl)
@@ -197,6 +198,7 @@ add_library(doxymain STATIC
     ${GENERATED_SRC}/scanner.l.h
     ${GENERATED_SRC}/sqlcode.l.h
     ${GENERATED_SRC}/vhdlcode.l.h
+    ${GENERATED_SRC}/xml.l.h
     ${GENERATED_SRC}/xmlcode.l.h
     ${GENERATED_SRC}/code.cpp
     ${GENERATED_SRC}/commentcnv.cpp
@@ -212,6 +214,7 @@ add_library(doxymain STATIC
     ${GENERATED_SRC}/scanner.cpp
     ${GENERATED_SRC}/sqlcode.cpp
     ${GENERATED_SRC}/vhdlcode.cpp
+    ${GENERATED_SRC}/xml.cpp
     ${GENERATED_SRC}/xmlcode.cpp
     #
     ${GENERATED_SRC}/ce_parse.cpp
@@ -296,6 +299,7 @@ add_library(doxymain STATIC
     searchindex.cpp
     sqlite3gen.cpp
     stlsupport.cpp
+    symbolresolver.cpp
     tagreader.cpp
     template.cpp
     textdocvisitor.cpp
@@ -328,7 +332,6 @@ if (use_libclang)
     find_package(LLVM REQUIRED CONFIG)
     find_package(Clang REQUIRED CONFIG)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        cmake_minimum_required(VERSION 3.1)
         target_compile_features(doxymain PRIVATE cxx_alignof)
         target_compile_features(doxygen PRIVATE cxx_alignof)
         if (use_libc++)
