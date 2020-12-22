@@ -784,7 +784,11 @@ void Markdown::writeMarkdownImage(const char *fmt, bool explicitTitle,
     m_out.addStr(title);
     m_out.addStr("\"");
   }
-  m_out.addStr("\n");
+  else
+  {
+    m_out.addStr(" ");// so the line break will not be part of the image name
+  }
+  m_out.addStr("\\ilinebr");
 }
 
 int Markdown::processLink(const char *data,int,int size)
@@ -808,6 +812,7 @@ int Markdown::processLink(const char *data,int,int size)
   }
   contentStart=i;
   int level=1;
+  int nlTotal=0;
   int nl=0;
   // find the matching ]
   while (i<size)
@@ -831,6 +836,8 @@ int Markdown::processLink(const char *data,int,int size)
     }
     i++;
   }
+  nlTotal += nl;
+  nl = 0;
   if (i>=size) return 0; // premature end of comment -> no link
   contentEnd=i;
   convertStringFragment(content,data+contentStart,contentEnd-contentStart);
@@ -843,9 +850,12 @@ int Markdown::processLink(const char *data,int,int size)
   if (i<size && data[i]=='\n') // one newline allowed here
   {
     i++;
+    nl++;
     // skip more whitespace
     while (i<size && data[i]==' ') i++;
   }
+  nlTotal += nl;
+  nl = 0;
 
   bool explicitTitle=FALSE;
   if (i<size && data[i]=='(') // inline link
@@ -854,7 +864,6 @@ int Markdown::processLink(const char *data,int,int size)
     while (i<size && data[i]==' ') i++;
     if (i<size && data[i]=='<') i++;
     linkStart=i;
-    nl=0;
     int braceCount=1;
     while (i<size && data[i]!='\'' && data[i]!='"' && braceCount>0)
     {
@@ -876,6 +885,8 @@ int Markdown::processLink(const char *data,int,int size)
         i++;
       }
     }
+    nlTotal += nl;
+    nl = 0;
     if (i>=size || data[i]=='\n') return 0;
     convertStringFragment(link,data+linkStart,i-linkStart);
     link = link.stripWhiteSpace();
@@ -985,6 +996,8 @@ int Markdown::processLink(const char *data,int,int size)
   {
     return 0;
   }
+  nlTotal += nl;
+  nl = 0;
   if (isToc) // special case for [TOC]
   {
     int toc_level = Config_getInt(TOC_INCLUDE_HEADINGS);
@@ -1037,7 +1050,11 @@ int Markdown::processLink(const char *data,int,int size)
         if (!(Portable::isAbsolutePath(link) || isURL(link)))
         {
           QFileInfo forg(link);
-          if (!(forg.exists() && forg.isReadable()))
+          if (forg.exists() && forg.isReadable())
+          {
+            link = forg.absFilePath().data();
+          }
+          else if (!(forg.exists() && forg.isReadable()))
           {
             QFileInfo fi(m_fileName);
             QCString mdFile = m_fileName.left(m_fileName.length()-fi.fileName().length()) + link;
@@ -1066,6 +1083,7 @@ int Markdown::processLink(const char *data,int,int size)
       m_out.addStr("<a href=\"");
       m_out.addStr(link);
       m_out.addStr("\"");
+      for (int ii = 0; ii < nlTotal; ii++) m_out.addStr("\n");
       if (!title.isEmpty())
       {
         m_out.addStr(" title=\"");
@@ -1675,7 +1693,12 @@ static bool isCodeBlock(const char *data,int offset,int size,int &indent)
   // search back 3 lines and remember the start of lines -1 and -2
   while (i>0 && nl<3)
   {
-    if (data[i-offset-1]=='\n') nl_pos[nl++]=i-offset;
+    int j = i-offset-1;
+    int nl_size = isNewline(data+j);
+    if (nl_size>0)
+    {
+      nl_pos[nl++]=j+nl_size;
+    }
     i--;
   }
 
@@ -1699,8 +1722,8 @@ static bool isCodeBlock(const char *data,int offset,int size,int &indent)
     // determine the indent of line -2
     indent=computeIndentExcludingListMarkers(data+nl_pos[2],nl_pos[1]-nl_pos[2]);
 
-    //printf(">isCodeBlock local_indent %d>=%d+4=%d\n",
-    //    indent0,indent2,indent0>=indent2+4);
+    //printf(">isCodeBlock local_indent %d>=%d+%d=%d\n",
+    //    indent0,indent,codeBlockIndent,indent0>=indent+codeBlockIndent);
     // if the difference is >4 spaces -> code block
     return indent0>=indent+codeBlockIndent;
   }
@@ -1923,16 +1946,16 @@ int Markdown::writeTableBlock(const char *data,int size)
     {
       if (row % 2)
       {
-        m_out.addStr("<tr class=\"markdownTableRowOdd\">");
+        m_out.addStr("\n<tr class=\"markdownTableRowOdd\">");
       }
       else
       {
-        m_out.addStr("<tr class=\"markdownTableRowEven\">");
+        m_out.addStr("\n<tr class=\"markdownTableRowEven\">");
       }
     }
     else
     {
-      m_out.addStr("  <tr class=\"markdownTableHead\">");
+      m_out.addStr("\n  <tr class=\"markdownTableHead\">");
     }
     for (int c = 0; c < columns; c++)
     {
@@ -1990,7 +2013,7 @@ int Markdown::writeTableBlock(const char *data,int size)
     }
     cellTag = "td";
     cellClass = "class=\"markdownTableBody";
-    m_out.addStr("  </tr>\n");
+    m_out.addStr("  </tr>");
   }
   m_out.addStr("</table>\n");
 
@@ -2023,7 +2046,7 @@ void Markdown::writeOneLineHeaderOrRuler(const char *data,int size)
   QCString id;
   if (isHRuler(data,size))
   {
-    m_out.addStr("\n<hr>\n");
+    m_out.addStr("<hr>\n");
   }
   else if ((level=isAtxHeader(data,size,header,id,TRUE)))
   {
@@ -2050,7 +2073,7 @@ void Markdown::writeOneLineHeaderOrRuler(const char *data,int size)
     {
       if (!id.isEmpty())
       {
-        m_out.addStr("\\anchor "+id+"\n");
+        m_out.addStr("\\anchor "+id+"\\ilinebr ");
       }
       hTag.sprintf("h%d",level);
       m_out.addStr("<"+hTag+">");
@@ -2058,13 +2081,17 @@ void Markdown::writeOneLineHeaderOrRuler(const char *data,int size)
       m_out.addStr("</"+hTag+">\n");
     }
   }
-  else // nothing interesting -> just output the line
+  else if (size>0) // nothing interesting -> just output the line
   {
-    m_out.addStr(data,size);
+    int tmpSize = size;
+    if (data[size-1] == '\n') tmpSize--;
+    m_out.addStr(data,tmpSize);
+
     if (hasLineBreak(data,size))
     {
-      m_out.addStr("<br>\n");
+      m_out.addStr("<br>");
     }
+    if (tmpSize != size) m_out.addChar('\n');
   }
 }
 
@@ -2100,14 +2127,14 @@ int Markdown::writeBlockQuote(const char *data,int size)
     {
       for (l=curLevel;l<level;l++)
       {
-        m_out.addStr("<blockquote>\n");
+        m_out.addStr("<blockquote>");
       }
     }
     else if (level<curLevel) // quote level decreased => add end markers
     {
       for (l=level;l<curLevel;l++)
       {
-        m_out.addStr("</blockquote>\n");
+        m_out.addStr("</blockquote>");
       }
     }
     curLevel=level;
@@ -2120,7 +2147,7 @@ int Markdown::writeBlockQuote(const char *data,int size)
   // end of comment within blockquote => add end markers
   for (l=0;l<curLevel;l++)
   {
-    m_out.addStr("</blockquote>\n");
+    m_out.addStr("</blockquote>");
   }
   return i;
 }
@@ -2130,6 +2157,7 @@ int Markdown::writeCodeBlock(const char *data,int size,int refIndent)
   TRACE(data);
   int i=0,end;
   //printf("writeCodeBlock: data={%s}\n",QCString(data).left(size).data());
+  // no need for \ilinebr here as the previous line was empty and was skipped
   m_out.addStr("@verbatim\n");
   int emptyLines=0;
   while (i<size)
@@ -2164,7 +2192,7 @@ int Markdown::writeCodeBlock(const char *data,int size,int refIndent)
       break;
     }
   }
-  m_out.addStr("@endverbatim\n");
+  m_out.addStr("@endverbatim\\ilinebr ");
   while (emptyLines>0) // write skipped empty lines
   {
     // add empty line
@@ -2263,7 +2291,7 @@ void Markdown::writeFencedCodeBlock(const char *data,const char *lng,
     m_out.addStr("{"+lang+"}");
   }
   addStrEscapeUtf8Nbsp(data+blockStart,blockEnd-blockStart);
-  m_out.addStr("\n");
+  m_out.addStr(" ");
   m_out.addStr("@endcode");
 }
 
@@ -2528,6 +2556,7 @@ QCString Markdown::extractPageTitle(QCString &docs,QCString &id, int &prepend)
   }
   if (i<end1 && isAtxHeader(data+i,end1-i,title,id,FALSE)>0)
   {
+    docs+="\n";
     docs+=docs_org.mid(end1);
   }
   else
@@ -2661,7 +2690,14 @@ QCString markdownFileNameToId(const QCString &fileName)
   QCString baseFn  = stripFromPath(QFileInfo(fileName).absFilePath().utf8());
   int i = baseFn.findRev('.');
   if (i!=-1) baseFn = baseFn.left(i);
-  QCString baseName = substitute(substitute(substitute(baseFn," ","_"),"/","_"),":","_");
+  QCString baseName = baseFn;
+  char *p = baseName.rawData();
+  char c;
+  while ((c=*p))
+  {
+    if (!isId(c)) *p='_'; // escape characters that do not yield an identifier by underscores
+    p++;
+  }
   //printf("markdownFileNameToId(%s)=md_%s\n",qPrint(fileName),qPrint(baseName));
   return "md_"+baseName;
 }

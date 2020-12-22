@@ -49,7 +49,7 @@
 class Doxyparse : public CodeOutputInterface
 {
   public:
-    Doxyparse(FileDef *fd) : m_fd(fd) {}
+    Doxyparse(const FileDef *fd) : m_fd(fd) {}
    ~Doxyparse() {}
 
     // these are just null functions, they can be used to produce a syntax highlighted
@@ -84,7 +84,7 @@ class Doxyparse : public CodeOutputInterface
     }
 
   private:
-    FileDef *m_fd;
+    const FileDef *m_fd;
 };
 
 static bool is_c_code = true;
@@ -110,7 +110,7 @@ static void findXRefSymbols(FileDef *fd)
   delete parse;
 }
 
-static bool ignoreStaticExternalCall(MemberDef *context, MemberDef *md) {
+static bool ignoreStaticExternalCall(const MemberDef *context, const MemberDef *md) {
   if (md->isStatic()) {
     if(md->getFileDef() && context->getFileDef()) {
       if(md->getFileDef()->getOutputFileBase() == context->getFileDef()->getOutputFileBase())
@@ -144,7 +144,7 @@ static void printInherits() {
   printf("    inherits:\n");
 }
 static void printInheritance(std::string base_class) {
-  printf("      - %s\n", base_class.c_str());
+  printf("      - \"%s\"\n", base_class.c_str());
 }
 static void printDefines() {
   printf("    defines:\n");
@@ -163,8 +163,8 @@ static void printPrototypeYes() {
 static void printNumberOfLines(int lines) {
   printf("          lines_of_code: %d\n", lines);
 }
-static void printNumberOfArguments(int arguments) {
-  printf("          parameters: %d\n", arguments);
+static void printNumberOfArguments(size_t arguments) {
+  printf("          parameters: %zu\n", arguments);
 }
 static void printUses() {
   printf("          uses:\n");
@@ -174,11 +174,11 @@ static void printReferenceTo(std::string type, std::string signature, std::strin
   printf("                type: %s\n", type.c_str());
   printf("                defined_in: \"%s\"\n", unescapeCharsInString(defined_in.c_str()).data());
 }
-static void printNumberOfConditionalPaths(MemberDef* md) {
+static void printNumberOfConditionalPaths(const MemberDef* md) {
   printf("          conditional_paths: %d\n", md->numberOfFlowKeyWords());
 }
 
-static int isPartOfCStruct(MemberDef * md) {
+static int isPartOfCStruct(const MemberDef * md) {
   return is_c_code && md->getClassDef() != NULL;
 }
 
@@ -198,7 +198,7 @@ std::string argumentData(const Argument &argument) {
   return data;
 }
 
-std::string functionSignature(MemberDef* md) {
+std::string functionSignature(const MemberDef* md) {
   std::string signature = sanitizeString(md->name().data());
   if(md->isFunction()){
     const ArgumentList &argList = md->argumentList();
@@ -215,7 +215,7 @@ std::string functionSignature(MemberDef* md) {
   return signature;
 }
 
-static void referenceTo(MemberDef* md) {
+static void referenceTo(const MemberDef* md) {
   std::string type = md->memberTypeName().data();
   std::string defined_in = "";
   std::string signature = "";
@@ -253,17 +253,17 @@ void protectionInformation(Protection protection) {
   }
 }
 
-void cModule(ClassDef* cd) {
-  MemberList* ml = cd->getMemberList(MemberListType_variableMembers);
+void cModule(const ClassDef* cd) {
+  const MemberList* ml = cd->getMemberList(MemberListType_variableMembers);
   if (ml) {
-    FileDef *fd = cd->getFileDef();
-    MemberList *fd_ml = fd->getMemberList(MemberListType_allMembersList);
+    const FileDef *fd = cd->getFileDef();
+    const MemberList *fd_ml = fd->getMemberList(MemberListType_allMembersList);
     if (!fd_ml || fd_ml->count() == 0) {
       printModule(fd->getOutputFileBase().data());
       printDefines();
     }
     MemberListIterator mli(*ml);
-    MemberDef* md;
+    const MemberDef* md;
     for (mli.toFirst(); (md=mli.current()); ++mli) {
       printDefinition("variable", cd->name().data() + std::string("::") + md->name().data(), md->getDefLine());
       protectionInformation(md->protection());
@@ -271,7 +271,7 @@ void cModule(ClassDef* cd) {
   }
 }
 
-static bool checkOverrideArg(const ArgumentList &argList, MemberDef *md) {
+static bool checkOverrideArg(const ArgumentList &argList, const MemberDef *md) {
   if(!md->isFunction() || argList.empty()){
     return false;
   }
@@ -285,7 +285,7 @@ static bool checkOverrideArg(const ArgumentList &argList, MemberDef *md) {
   return false;
 }
 
-void functionInformation(MemberDef* md) {
+void functionInformation(const MemberDef* md) {
   std::string temp = "";
   int size = md->getEndBodyLine() - md->getStartBodyLine() + 1;
   printNumberOfLines(size);
@@ -301,12 +301,10 @@ void functionInformation(MemberDef* md) {
   }
 
   printNumberOfConditionalPaths(md);
-  MemberSDict *defDict = md->getReferencesMembers();
-  if (defDict) {
-    MemberSDict::Iterator msdi(*defDict);
-    MemberDef *rmd;
+  auto refList = md->getReferencesMembers();
+  if (!refList.empty()) {
     printUses();
-    for (msdi.toFirst(); (rmd=msdi.current()); ++msdi) {
+    for (const auto &rmd : refList) {
       if (rmd->definitionType() == Definition::TypeMember && !ignoreStaticExternalCall(md, rmd) && !checkOverrideArg(argList, rmd)) {
         referenceTo(rmd);
       }
@@ -314,15 +312,15 @@ void functionInformation(MemberDef* md) {
   }
 }
 
-void prototypeInformation(MemberDef* md) {
+void prototypeInformation(const MemberDef* md) {
   printPrototypeYes();
   const ArgumentList &argList = md->argumentList();
   printNumberOfArguments(argList.size());
 }
 
-static void lookupSymbol(Definition *d) {
+static void lookupSymbol(const Definition *d) {
   if (d->definitionType() == Definition::TypeMember) {
-    MemberDef *md = dynamic_cast<MemberDef*>(d);
+    const MemberDef *md = dynamic_cast<const MemberDef*>(d);
     std::string type = md->memberTypeName().data();
     std::string signature = functionSignature(md);
     printDefinition(type, signature, md->getDefLine());
@@ -336,17 +334,17 @@ static void lookupSymbol(Definition *d) {
   }
 }
 
-void listMembers(MemberList *ml) {
+void listMembers(const MemberList *ml) {
   if (ml) {
     MemberListIterator mli(*ml);
-    MemberDef *md;
+    const MemberDef *md;
     for (mli.toFirst(); (md=mli.current()); ++mli) {
       lookupSymbol((Definition*) md);
     }
   }
 }
 
-void listAllMembers(ClassDef* cd) {
+void listAllMembers(const ClassDef* cd) {
   // methods
   listMembers(cd->getMemberList(MemberListType_functionMembers));
   // constructors
@@ -355,18 +353,15 @@ void listAllMembers(ClassDef* cd) {
   listMembers(cd->getMemberList(MemberListType_variableMembers));
 }
 
-static void classInformation(ClassDef* cd) {
+static void classInformation(const ClassDef* cd) {
   if (is_c_code) {
     cModule(cd);
   } else {
     printModule(cd->name().data());
-    BaseClassList* baseClasses = cd->baseClasses();
-    if (baseClasses) {
+    if (!cd->baseClasses().empty()) {
       printInherits();
-      BaseClassListIterator bci(*baseClasses);
-      BaseClassDef* bcd;
-      for (bci.toFirst(); (bcd = bci.current()); ++bci) {
-        printInheritance(bcd->classDef->name().data());
+      for (const auto &bcd : cd->baseClasses()) {
+        printInheritance(sanitizeString(bcd.classDef->name().data()));
       }
     }
     if(cd->isAbstract()) {
@@ -418,15 +413,11 @@ static void listSymbols() {
         listMembers(ml);
       }
 
-      ClassSDict *classes = fd->getClassSDict();
-      if (classes) {
-        ClassSDict::Iterator cli(*classes);
-        ClassDef *cd;
-        for (cli.toFirst(); (cd = cli.current()); ++cli) {
-          if (!cd->isVisited()) {
-            classInformation(cd);
-            cd->setVisited(TRUE);
-          }
+      ClassDefSet visitedClasses;
+      for (const auto &cd : fd->getClasses()) {
+        if (visitedClasses.find(cd)==visitedClasses.end()) {
+          classInformation(cd);
+          visitedClasses.insert(cd);
         }
       }
     }
@@ -435,14 +426,26 @@ static void listSymbols() {
 }
 
 int main(int argc,char **argv) {
-  if (argc < 2) {
+  int locArgc = argc;
+
+  if (locArgc == 2)
+  {
+    if (!strcmp(argv[1],"--help"))
+    {
+      printf("Usage: %s [source_file | source_dir]\n",argv[0]);
+      exit(0);
+    }
+    else if (!strcmp(argv[1],"--version"))
+    {
+      printf("%s version: %s\n",argv[0],getFullVersion());
+      exit(0);
+    }
+  }
+
+  if (locArgc!=2)
+  {
     printf("Usage: %s [source_file | source_dir]\n",argv[0]);
     exit(1);
-  }
-  if (qstrcmp(&argv[1][2], "version") == 0) {
-    QCString versionString = getDoxygenVersion();
-    printf("%s\n", versionString.data());
-    exit(0);
   }
 
   // initialize data structures

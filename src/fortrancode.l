@@ -141,7 +141,7 @@ struct fortrancodeYY_state
   CodeOutputInterface * code = 0;
 
   const char *  inputString = 0;     //!< the code fragment as text
-  int           inputPosition = 0;   //!< read offset during parsing
+  yy_size_t     inputPosition = 0;   //!< read offset during parsing
   int           inputLines = 0;      //!< number of line in the code fragment
   int           yyLineNr = 0;        //!< current line number
   int           contLineNr = 0;      //!< current, local, line number for continuation determination
@@ -212,6 +212,11 @@ static MemberDef *getFortranDefs(yyscan_t yyscanner,const QCString &memberName, 
                                  UseSDict *usedict=0);
 static yy_size_t yyread(yyscan_t yyscanner,char *buf,yy_size_t max_size);
 
+
+//-------------------------------------------------------------------
+
+static std::mutex g_docCrossReferenceMutex;
+static std::mutex g_countFlowKeywordsMutex;
 
 /* -----------------------------------------------------------------*/
 #undef  YY_INPUT
@@ -296,7 +301,12 @@ LANGUAGE_BIND_SPEC BIND{BS}"("{BS}C{BS}(,{BS}NAME{BS}"="{BS}"\""(.*)"\""{BS})?")
                                           }
                                           if (yyextra->currentMemberDef && yyextra->currentMemberDef->isFunction())
                                           {
-                                            yyextra->currentMemberDef->incrementFlowKeyWordCount();
+                                            std::lock_guard<std::mutex> lock(g_countFlowKeywordsMutex);
+                                            MemberDefMutable *mdm = toMemberDefMutable(yyextra->currentMemberDef);
+                                            if (mdm)
+                                            {
+                                              mdm->incrementFlowKeyWordCount();
+                                            }
                                           }
                                           /* font class is defined e.g. in doxygen.css */
                                           startFontClass(yyscanner,"keywordflow");
@@ -1012,7 +1022,7 @@ static void writeMultiLineCodeLink(yyscan_t yyscanner,CodeOutputInterface &ol,
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
   static bool sourceTooltips = Config_getBool(SOURCE_TOOLTIPS);
-  TooltipManager::instance()->addTooltip(d);
+  TooltipManager::instance().addTooltip(ol,d);
   QCString ref  = d->getReference();
   QCString file = d->getOutputFileBase();
   QCString anchor = d->anchor();
@@ -1078,12 +1088,12 @@ static bool getFortranTypeDefs(const QCString &tname, const QCString &moduleName
   //cout << "=== search for type: " << tname << endl;
 
   // search for type
-  if ((cd=Doxygen::classSDict->find(tname)))
+  if ((cd=Doxygen::classLinkedMap->find(tname)))
   {
     //cout << "=== type found in global module" << endl;
     return TRUE;
   }
-  else if (moduleName && (cd= Doxygen::classSDict->find(moduleName+"::"+tname)))
+  else if (moduleName && (cd= Doxygen::classLinkedMap->find(moduleName+"::"+tname)))
   {
     //cout << "=== type found in local module" << endl;
     return TRUE;
@@ -1093,7 +1103,7 @@ static bool getFortranTypeDefs(const QCString &tname, const QCString &moduleName
     UseEntry *use;
     for (UseSDict::Iterator di(*usedict); (use=di.current()); ++di)
     {
-      if ((cd= Doxygen::classSDict->find(use->module+"::"+tname)))
+      if ((cd= Doxygen::classLinkedMap->find(use->module+"::"+tname)))
       {
         //cout << "===  type found in used module" << endl;
         return TRUE;
@@ -1232,7 +1242,8 @@ static bool getLink(yyscan_t yyscanner,UseSDict *usedict, // dictionary with use
       if (yyextra->currentDefinition && yyextra->currentMemberDef &&
           md!=yyextra->currentMemberDef && yyextra->insideBody && yyextra->collectXRefs)
       {
-        addDocCrossReference(yyextra->currentMemberDef,md);
+        std::lock_guard<std::mutex> lock(g_docCrossReferenceMutex);
+        addDocCrossReference(toMemberDefMutable(yyextra->currentMemberDef),toMemberDefMutable(md));
       }
       writeMultiLineCodeLink(yyscanner,ol,md,text ? text : memberText);
       addToSearchIndex(yyscanner, text ? text : memberText);
@@ -1514,6 +1525,10 @@ void FortranCodeParser::parseCode(CodeOutputInterface & codeOutIntf,
   }
   if (yyextra->hasContLine) free(yyextra->hasContLine);
   yyextra->hasContLine = NULL;
+
+  // write the tooltips
+  TooltipManager::instance().writeTooltips(codeOutIntf);
+
   printlex(yy_flex_debug, FALSE, __FILE__, fileDef ? fileDef->fileName().data(): NULL);
 }
 

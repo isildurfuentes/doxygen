@@ -521,7 +521,6 @@ static void writeDefaultHeaderPart1(FTextStream &t)
   // Load required packages
   t << "% Packages required by doxygen\n"
        "\\usepackage{fixltx2e}\n" // for \textsubscript
-       "\\usepackage{calc}\n"
        "\\usepackage{doxygen}\n";
   const StringVector &extraLatexStyles = Config_getList(LATEX_EXTRA_STYLESHEET);
   for (const auto &extraStyle : extraLatexStyles)
@@ -547,13 +546,10 @@ static void writeDefaultHeaderPart1(FTextStream &t)
   t << "\\usepackage{graphicx}\n"
        "\\usepackage[utf8]{inputenc}\n"
        "\\usepackage{makeidx}\n"
-       "\\usepackage{multicol}\n"
-       "\\usepackage{multirow}\n"
        "\\PassOptionsToPackage{warn}{textcomp}\n"
        "\\usepackage{textcomp}\n"
        "\\usepackage[nointegrals]{wasysym}\n"
-       "\\usepackage[table]{xcolor}\n"
-       "\\usepackage{ifpdf,ifxetex}\n"
+       "\\usepackage{ifxetex}\n"
        "\n";
 
   // Language support
@@ -577,8 +573,7 @@ static void writeDefaultHeaderPart1(FTextStream &t)
   {
     t << font;
   }
-  t << "\\usepackage{amssymb}\n"
-       "\\usepackage{sectsty}\n"
+  t << "\\usepackage{sectsty}\n"
        "\\allsectionsfont{%\n"
        "  \\fontseries{bc}\\selectfont%\n"
        "  \\color{darkgray}%\n"
@@ -666,19 +661,24 @@ static void writeDefaultHeaderPart1(FTextStream &t)
   t << "% Headers & footers\n"
        "\\usepackage{fancyhdr}\n"
        "\\pagestyle{fancyplain}\n"
-       "\\fancyhead[LE]{\\fancyplain{}{\\bfseries\\thepage}}\n"
-       "\\fancyhead[CE]{\\fancyplain{}{}}\n"
-       "\\fancyhead[RE]{\\fancyplain{}{\\bfseries\\leftmark}}\n"
-       "\\fancyhead[LO]{\\fancyplain{}{\\bfseries\\rightmark}}\n"
-       "\\fancyhead[CO]{\\fancyplain{}{}}\n"
-       "\\fancyhead[RO]{\\fancyplain{}{\\bfseries\\thepage}}\n"
-       "\\fancyfoot[LE]{\\fancyplain{}{}}\n"
-       "\\fancyfoot[CE]{\\fancyplain{}{}}\n"
-       "\\fancyfoot[RE]{\\fancyplain{}{\\bfseries\\scriptsize " << genString << " Doxygen }}\n"
-       "\\fancyfoot[LO]{\\fancyplain{}{\\bfseries\\scriptsize " << genString << " Doxygen }}\n"
-       "\\fancyfoot[CO]{\\fancyplain{}{}}\n"
-       "\\fancyfoot[RO]{\\fancyplain{}{}}\n"
-       "\\renewcommand{\\footrulewidth}{0.4pt}\n";
+       "\\renewcommand{\\footrulewidth}{0.4pt}\n"
+       "%\n"
+       "\\fancypagestyle{fancyplain}{\n"
+       "\\fancyhf{}\n"
+       "\\fancyhead[LE, RO]{\\bfseries\\thepage}\n"
+       "\\fancyhead[LO]{\\bfseries\\rightmark}\n"
+       "\\fancyhead[RE]{\\bfseries\\leftmark}\n"
+       "\\fancyfoot[LO, RE]{\\bfseries\\scriptsize " << genString << " Doxygen }\n"
+       "}\n"
+       "%\n"
+       "\\fancypagestyle{plain}{\n"
+       "\\fancyhf{}\n"
+       "\\fancyfoot[LO, RE]{\\bfseries\\scriptsize " << genString << " Doxygen }\n"
+       "\\renewcommand{\\headrulewidth}{0pt}}\n"
+       "%\n"
+       "\\pagestyle{fancyplain}\n"
+       "%\n";
+
   if (!Config_getBool(COMPACT_LATEX))
   {
     t << "\\renewcommand{\\chaptermark}[1]{%\n"
@@ -769,7 +769,8 @@ static void writeDefaultHeaderPart1(FTextStream &t)
   // End of preamble, now comes the document contents
   t << "%===== C O N T E N T S =====\n"
        "\n"
-       "\\begin{document}\n";
+       "\\begin{document}\n"
+       "\\raggedbottom\n";
   QCString documentPre = theTranslator->latexDocumentPre();
   if (!documentPre.isEmpty())
   {
@@ -901,7 +902,7 @@ void LatexGenerator::writeStyleSheetFile(QFile &f)
   writeDefaultStyleSheet(t);
 }
 
-void LatexGenerator::startFile(const char *name,const char *,const char *)
+void LatexGenerator::startFile(const char *name,const char *,const char *,int)
 {
 #if 0
   setEncoding(Config_getString(LATEX_OUTPUT_ENCODING));
@@ -1034,7 +1035,7 @@ void LatexGenerator::startIndexSection(IndexSections is)
         bool found=FALSE;
         for (nli.toFirst();(nd=nli.current()) && !found;++nli)
         {
-          if (nd->isLinkableInProject())
+          if (nd->isLinkableInProject() && !nd->isAlias())
           {
             if (compactLatex) t << "\\doxysection"; else t << "\\chapter";
             t << "{"; // Namespace Documentation}\n":
@@ -1045,19 +1046,17 @@ void LatexGenerator::startIndexSection(IndexSections is)
       break;
     case isClassDocumentation:
       {
-        ClassSDict::Iterator cli(*Doxygen::classSDict);
-        ClassDef *cd=0;
-        bool found=FALSE;
-        for (cli.toFirst();(cd=cli.current()) && !found;++cli)
+        for (const auto &cd : *Doxygen::classLinkedMap)
         {
           if (cd->isLinkableInProject() &&
               cd->templateMaster()==0 &&
-              !cd->isEmbeddedInOuterScope()
+              !cd->isEmbeddedInOuterScope() &&
+              !cd->isAlias()
              )
           {
             if (compactLatex) t << "\\doxysection"; else t << "\\chapter";
             t << "{"; //Compound Documentation}\n";
-            found=TRUE;
+            break;
           }
         }
       }
@@ -1203,7 +1202,7 @@ void LatexGenerator::endIndexSection(IndexSections is)
         bool found=FALSE;
         for (nli.toFirst();(nd=nli.current()) && !found;++nli)
         {
-          if (nd->isLinkableInProject())
+          if (nd->isLinkableInProject() && !nd->isAlias())
           {
             t << "}\n\\input{" << nd->getOutputFileBase() << "}\n";
             found=TRUE;
@@ -1211,7 +1210,7 @@ void LatexGenerator::endIndexSection(IndexSections is)
         }
         while ((nd=nli.current()))
         {
-          if (nd->isLinkableInProject())
+          if (nd->isLinkableInProject() && !nd->isAlias())
           {
             //if (compactLatex) t << "\\input"; else t << "\\include";
             t << "\\input";
@@ -1223,30 +1222,21 @@ void LatexGenerator::endIndexSection(IndexSections is)
       break;
     case isClassDocumentation:
       {
-        ClassSDict::Iterator cli(*Doxygen::classSDict);
-        ClassDef *cd=0;
         bool found=FALSE;
-        for (cli.toFirst();(cd=cli.current()) && !found;++cli)
+        for (const auto &cd : *Doxygen::classLinkedMap)
         {
           if (cd->isLinkableInProject() &&
               cd->templateMaster()==0 &&
-             !cd->isEmbeddedInOuterScope()
+             !cd->isEmbeddedInOuterScope() &&
+             !cd->isAlias()
              )
           {
-            t << "}\n\\input{" << cd->getOutputFileBase() << "}\n";
-            found=TRUE;
-          }
-        }
-        for (;(cd=cli.current());++cli)
-        {
-          if (cd->isLinkableInProject() &&
-              cd->templateMaster()==0 &&
-             !cd->isEmbeddedInOuterScope()
-             )
-          {
-            //if (compactLatex) t << "\\input"; else t << "\\include";
-            t << "\\input";
-            t << "{" << cd->getOutputFileBase() << "}\n";
+            if (!found)
+            {
+              t << "}\n"; // end doxysection or chapter title
+              found=TRUE;
+            }
+            t << "\\input{" << cd->getOutputFileBase() << "}\n";
           }
         }
       }
@@ -1262,24 +1252,14 @@ void LatexGenerator::endIndexSection(IndexSections is)
             {
               if (isFirst)
               {
-                t << "}\n\\input{" << fd->getOutputFileBase() << "}\n";
-                if (sourceBrowser && m_prettyCode && fd->generateSourceFile())
-                {
-                  //t << "\\include{" << fd->getSourceFileBase() << "}\n";
-                  t << "\\input{" << fd->getSourceFileBase() << "}\n";
-                }
-                isFirst=FALSE;
+                t << "}\n"; // end doxysection or chapter title
               }
-              else
+              isFirst=FALSE;
+              t << "\\input{" << fd->getOutputFileBase() << "}\n";
+              if (sourceBrowser && m_prettyCode && fd->generateSourceFile())
               {
-                //if (compactLatex) t << "\\input" ; else t << "\\include";
-                t << "\\input" ;
-                t << "{" << fd->getOutputFileBase() << "}\n";
-                if (sourceBrowser && m_prettyCode && fd->generateSourceFile())
-                {
-                  //t << "\\include{" << fd->getSourceFileBase() << "}\n";
-                  t << "\\input{" << fd->getSourceFileBase() << "}\n";
-                }
+                //t << "\\include{" << fd->getSourceFileBase() << "}\n";
+                t << "\\input{" << fd->getSourceFileBase() << "}\n";
               }
             }
           }
@@ -2229,7 +2209,7 @@ void LatexGenerator::exceptionEntry(const char* prefix,bool closeBracket)
   t << " ";
 }
 
-void LatexGenerator::writeDoc(DocNode *n,const Definition *ctx,const MemberDef *)
+void LatexGenerator::writeDoc(DocNode *n,const Definition *ctx,const MemberDef *,int)
 {
   LatexDocVisitor *visitor =
     new LatexDocVisitor(t,m_codeGen,ctx?ctx->getDefFileExtension():QCString(""),m_insideTabbing);

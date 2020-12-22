@@ -23,8 +23,6 @@
 #include "util.h"
 #include "config.h"
 
-#define DOT_TRANSPARENT       Config_getBool(DOT_TRANSPARENT)
-
 DotGroupCollaboration::DotGroupCollaboration(const GroupDef* gd)
 {
   QCString tmp_url = gd->getReference()+"$"+gd->getOutputFileBase();
@@ -111,19 +109,14 @@ void DotGroupCollaboration::buildGraph(const GroupDef* gd)
   addMemberList( gd->getMemberList(MemberListType_allMembersList) );
 
   // Add classes
-  if ( gd->getClasses() && gd->getClasses()->count() )
+  for (const auto &def : gd->getClasses())
   {
-    ClassSDict::Iterator defli(*gd->getClasses());
-    ClassDef *def;
-    for (;(def=defli.current());++defli)
+    tmp_url = def->getReference()+"$"+def->getOutputFileBase()+Doxygen::htmlFileExtension;
+    if (!def->anchor().isEmpty())
     {
-      tmp_url = def->getReference()+"$"+def->getOutputFileBase()+Doxygen::htmlFileExtension;
-      if (!def->anchor().isEmpty())
-      {
-        tmp_url+="#"+def->anchor();
-      }
-      addCollaborationMember( def, tmp_url, DotGroupCollaboration::tclass );
+      tmp_url+="#"+def->anchor();
     }
+    addCollaborationMember( def, tmp_url, DotGroupCollaboration::tclass );
   }
 
   // Add namespaces
@@ -379,7 +372,7 @@ void DotGroupCollaboration::writeGraphHeader(FTextStream &t,const QCString &titl
   }
   t << endl;
   t << "{" << endl;
-  if (DOT_TRANSPARENT)
+  if (Config_getBool(DOT_TRANSPARENT))
   {
     t << "  bgcolor=\"transparent\";" << endl;
   }

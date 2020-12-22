@@ -35,6 +35,26 @@ def xpopen(cmd, cmd1="",encoding='utf-8-sig', getStderr=False):
 			proc = subprocess.Popen(shlex.split(cmd),stdout=subprocess.PIPE,stderr=subprocess.PIPE,encoding=encoding) # Python 3 with encoding
 			return proc.stdout.read()
 
+def clean_header(errmsg):
+	# messages (due to the usage of more) have a contents like:
+	# ::::::::::::
+	# <file name>
+	# ::::::::::::
+	# we want to skip these
+	msg = errmsg.split('\n')
+	rtnmsg = ""
+	cnt = -1
+	for o in msg:
+		if (o):
+			if (cnt == -1):
+				if o.startswith(":::::::"):
+					cnt = 3
+			if (cnt > 0):
+				cnt-=1
+			else:
+				rtnmsg+=0
+	return rtnmsg
+ 
 class Tester:
 	def __init__(self,args,test):
 		self.args      = args
@@ -118,6 +138,7 @@ class Tester:
 			print('INPUT=%s/%s' % (self.args.inputdir,self.test), file=f)
 			print('STRIP_FROM_PATH=%s' % self.args.inputdir, file=f)
 			print('EXAMPLE_PATH=%s' % self.args.inputdir, file=f)
+			print('WARN_LOGFILE=%s/warnings.log' % self.test_out, file=f)
 			if 'config' in self.config:
 				for option in self.config['config']:
 					print(option, file=f)
@@ -162,7 +183,7 @@ class Tester:
 
 		# run doxygen
 		if (sys.platform == 'win32'):
-			redir=' > nul:'
+			redir=' > nul: 2>&1'
 		else:
 			redir=' 2> /dev/null > /dev/null'
 
@@ -279,6 +300,8 @@ class Tester:
 					msg += ('Failed to run %s with schema %s for files: %s' % (self.args.xmllint,index_xsd,index_xml),)
 					failed_xmlxsd=True
 				if xmllint_out:
+					xmllint_out  = clean_header(xmllint_out)
+				if xmllint_out:
 					msg += (xmllint_out,)
 					failed_xmlxsd=True
 				#
@@ -304,6 +327,8 @@ class Tester:
 				else:
 					msg += ('Failed to run %s with schema %s for files: %s' % (self.args.xmllint,compound_xsd,compound_xml),)
 					failed_xmlxsd=True
+				if xmllint_out:
+					xmllint_out  = clean_header(xmllint_out)
 				if xmllint_out:
 					msg += (xmllint_out,)
 					failed_xmlxsd=True
@@ -337,6 +362,8 @@ class Tester:
 			xmllint_out = xpopen(exe_string,exe_string1,getStderr=True)
 			xmllint_out = self.cleanup_xmllint_docbook(xmllint_out)
 			if xmllint_out:
+				xmllint_out  = clean_header(xmllint_out)
+			if xmllint_out:
 				msg += (xmllint_out,)
 				failed_docbook=True
 			elif not self.args.keep:
@@ -359,6 +386,8 @@ class Tester:
 			failed_html=False
 			xmllint_out = xpopen(exe_string,exe_string1,getStderr=True)
 			xmllint_out = self.cleanup_xmllint(xmllint_out)
+			if xmllint_out:
+				xmllint_out  = clean_header(xmllint_out)
 			if xmllint_out:
 				msg += (xmllint_out,)
 				failed_html=True
@@ -400,7 +429,12 @@ class Tester:
 			elif not self.args.keep:
 				shutil.rmtree(latex_output,ignore_errors=True)
 
-		if failed_xml or failed_html or failed_latex or failed_docbook or failed_rtf or failed_xmlxsd:
+		warnings = xopen(self.test_out + "/warnings.log",'r',encoding='ISO-8859-1').read()
+		failed_warn =  len(warnings)!=0
+		if failed_warn:
+			msg += (warnings,)
+
+		if failed_warn or failed_xml or failed_html or failed_latex or failed_docbook or failed_rtf or failed_xmlxsd:
 			testmgr.ok(False,self.test_name,msg)
 			return False
 
@@ -475,6 +509,7 @@ class TestManager:
 			shutil.copytree(self.args.inputdir+"/dtd", "dtd")
 
 def split_and_keep(s,sep):
+    s = s.replace('"','')             # add token separator
     s = s.replace(sep,'\0'+sep)             # add token separator
     s = s.split('\0')                       # split by null delimiter
     s = [x.strip() for x in filter(None,s)] # strip and remove empty elements

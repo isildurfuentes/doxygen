@@ -1569,6 +1569,7 @@ void PerlModGenerator::generatePerlModForMember(const MemberDef *md,const Defini
   //     (templateArguments(), definitionTemplateParameterLists())
 
   QCString memType;
+  QCString name;
   bool isFunc=FALSE;
   switch (md->memberType())
   {
@@ -1590,9 +1591,12 @@ void PerlModGenerator::generatePerlModForMember(const MemberDef *md,const Defini
     case MemberType_Dictionary:  memType="dictionary"; break;
   }
 
+  name = md->name();
+  if (md->isAnonymous()) name = "__unnamed" + name.right(name.length() - 1)+"__";
+
   m_output.openHash()
     .addFieldQuotedString("kind", memType)
-    .addFieldQuotedString("name", md->name())
+    .addFieldQuotedString("name", name)
     .addFieldQuotedString("virtualness", getVirtualnessName(md->virtualness()))
     .addFieldQuotedString("protection", getProtectionName(md->protection()))
     .addFieldBoolean("static", md->isStatic());
@@ -1696,14 +1700,12 @@ void PerlModGenerator::generatePerlModForMember(const MemberDef *md,const Defini
     }
   }
 
-  /* DGA: fix #7495  Perlmod does not generate bitfield */
   if (md->memberType() == MemberType_Variable && md->bitfieldString())
   {
-	QCString bitfield = md->bitfieldString();
-	if (bitfield.at(0) == ':') bitfield = bitfield.mid(1);
-	m_output.addFieldQuotedString("bitfield", bitfield);
+    QCString bitfield = md->bitfieldString();
+    if (bitfield.at(0) == ':') bitfield = bitfield.mid(1);
+    m_output.addFieldQuotedString("bitfield", bitfield);
   }
-  /* DGA: end of fix #7495 */
 
   const MemberDef *rmd = md->reimplements();
   if (rmd)
@@ -1830,42 +1832,40 @@ void PerlModGenerator::generatePerlModForClass(const ClassDef *cd)
 
   m_output.openHash()
     .addFieldQuotedString("name", cd->name());
+  /* DGA: fix # #7547 Perlmod does not generate "kind" information to discriminate struct/union */
+  m_output.addFieldQuotedString("kind", cd->compoundTypeString());
 
-  if (cd->baseClasses())
+  if (!cd->baseClasses().empty())
   {
     m_output.openList("base");
-    BaseClassListIterator bcli(*cd->baseClasses());
-    BaseClassDef *bcd;
-    for (bcli.toFirst();(bcd=bcli.current());++bcli)
+    for (const auto &bcd : cd->baseClasses())
+    {
       m_output.openHash()
-	.addFieldQuotedString("name", bcd->classDef->displayName())
-	.addFieldQuotedString("virtualness", getVirtualnessName(bcd->virt))
-	.addFieldQuotedString("protection", getProtectionName(bcd->prot))
+	.addFieldQuotedString("name", bcd.classDef->displayName())
+	.addFieldQuotedString("virtualness", getVirtualnessName(bcd.virt))
+	.addFieldQuotedString("protection", getProtectionName(bcd.prot))
 	.closeHash();
+    }
     m_output.closeList();
   }
 
-  if (cd->subClasses())
+  if (!cd->subClasses().empty())
   {
     m_output.openList("derived");
-    BaseClassListIterator bcli(*cd->subClasses());
-    BaseClassDef *bcd;
-    for (bcli.toFirst();(bcd=bcli.current());++bcli)
+    for (const auto &bcd : cd->subClasses())
+    {
       m_output.openHash()
-	.addFieldQuotedString("name", bcd->classDef->displayName())
-	.addFieldQuotedString("virtualness", getVirtualnessName(bcd->virt))
-	.addFieldQuotedString("protection", getProtectionName(bcd->prot))
+	.addFieldQuotedString("name", bcd.classDef->displayName())
+	.addFieldQuotedString("virtualness", getVirtualnessName(bcd.virt))
+	.addFieldQuotedString("protection", getProtectionName(bcd.prot))
 	.closeHash();
+    }
     m_output.closeList();
   }
 
-  ClassSDict *cl = cd->getClassSDict();
-  if (cl)
   {
     m_output.openList("inner");
-    ClassSDict::Iterator cli(*cl);
-    const ClassDef *icd;
-    for (cli.toFirst();(icd=cli.current());++cli)
+    for (const auto &icd : cd->getClasses())
       m_output.openHash()
 	.addFieldQuotedString("name", icd->name())
 	.closeHash();
@@ -1966,13 +1966,9 @@ void PerlModGenerator::generatePerlModForNamespace(const NamespaceDef *nd)
   m_output.openHash()
     .addFieldQuotedString("name", nd->name());
 
-  ClassSDict *cl = nd->getClassSDict();
-  if (cl)
   {
     m_output.openList("classes");
-    ClassSDict::Iterator cli(*cl);
-    const ClassDef *cd;
-    for (cli.toFirst();(cd=cli.current());++cli)
+    for (const auto &cd : nd->getClasses())
       m_output.openHash()
 	.addFieldQuotedString("name", cd->name())
 	.closeHash();
@@ -2112,13 +2108,9 @@ void PerlModGenerator::generatePerlModForGroup(const GroupDef *gd)
     m_output.closeList();
   }
 
-  ClassSDict *cl = gd->getClasses();
-  if (cl)
   {
     m_output.openList("classes");
-    ClassSDict::Iterator cli(*cl);
-    const ClassDef *cd;
-    for (cli.toFirst();(cd=cli.current());++cli)
+    for (const auto &cd : gd->getClasses())
       m_output.openHash()
 	.addFieldQuotedString("name", cd->name())
 	.closeHash();
@@ -2210,10 +2202,8 @@ bool PerlModGenerator::generatePerlModOutput()
   m_output.add("$doxydocs=").openHash();
 
   m_output.openList("classes");
-  ClassSDict::Iterator cli(*Doxygen::classSDict);
-  const ClassDef *cd;
-  for (cli.toFirst();(cd=cli.current());++cli)
-    generatePerlModForClass(cd);
+  for (const auto &cd : *Doxygen::classLinkedMap)
+    generatePerlModForClass(cd.get());
   m_output.closeList();
 
   m_output.openList("namespaces");

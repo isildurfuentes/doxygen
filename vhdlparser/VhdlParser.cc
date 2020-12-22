@@ -4541,7 +4541,7 @@ assert(false);
 }
 
 
-QCString VhdlParser::instantiation_unit() {QCString s,s1,s2;Token *tok;
+QCString VhdlParser::instantiation_unit() {QCString s,s1,s2;
     switch ((jj_ntk==-1)?jj_ntk_f():jj_ntk) {
     case COMPONENT_T:
     case BASIC_IDENTIFIER:
