@@ -179,16 +179,16 @@ static void lookupSymbol(Definition *d)
       case Definition::TypeFile:
         {
           FileDef *fd = dynamic_cast<FileDef*>(d);
-          printf("Kind: File: #includes %d other files\n",
-              fd->includeFileList() ? fd->includeFileList()->count() : 0);
+          printf("Kind: File: #includes %zu other files\n",
+              fd->includeFileList().size());
         }
         break;
       case Definition::TypeNamespace:
         {
           NamespaceDef *nd = dynamic_cast<NamespaceDef*>(d);
-          printf("Kind: Namespace: contains %zu classes and %d namespaces\n",
+          printf("Kind: Namespace: contains %zu classes and %zu namespaces\n",
               nd->getClasses().size(),
-              nd->getNamespaceSDict() ? nd->getNamespaceSDict()->count() : 0);
+              nd->getNamespaces().size());
         }
         break;
       case Definition::TypeMember:
@@ -296,9 +296,6 @@ int main(int argc,char **argv)
     }
   }
 
-  // remove temporary files
-  if (!Doxygen::objDBFileName.isEmpty()) QFile::remove(Doxygen::objDBFileName);
-  if (!Doxygen::entryDBFileName.isEmpty()) QFile::remove(Doxygen::entryDBFileName);
   // clean up after us
   QDir().rmdir("/tmp/doxygen");
 

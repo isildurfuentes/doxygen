@@ -19,19 +19,17 @@
 #include <set>
 
 #include <qstrlist.h>
-#include <qdict.h>
-#include "sortdict.h"
 #include "definition.h"
 #include "filedef.h"
 #include "linkedmap.h"
+#include "membergroup.h"
 
 class MemberList;
 class ClassDef;
 class OutputList;
 class ClassLinkedRefMap;
 class MemberDef;
-class MemberGroupSDict;
-class NamespaceSDict;
+class NamespaceDef;
 class FTextStream;
 class NamespaceDef;
 class NamespaceDefMutable;
@@ -40,6 +38,17 @@ class NamespaceDefMutable;
 
 using NamespaceDefSet = std::set<const NamespaceDef*>;
 
+class NamespaceLinkedMap : public LinkedMap<NamespaceDef>
+{
+};
+
+class NamespaceLinkedRefMap : public LinkedRefMap<const NamespaceDef>
+{
+  public:
+    void writeDeclaration(OutputList &ol,const char *title,
+            bool isConstantGroup=false, bool localName=FALSE);
+    bool declVisible() const;
+};
 
 /** An abstract interface of a namespace symbol. */
 class NamespaceDef : public Definition
@@ -66,11 +75,11 @@ class NamespaceDef : public Definition
     virtual const Definition *findInnerCompound(const char *name) const = 0;
     virtual bool subGrouping() const = 0;
     virtual MemberList *getMemberList(MemberListType lt) const = 0;
-    virtual const QList<MemberList> &getMemberLists() const = 0;
-    virtual MemberDef *getMemberByName(const QCString &) const = 0;
+    virtual const MemberLists &getMemberLists() const = 0;
+    virtual const MemberDef *getMemberByName(const QCString &) const = 0;
 
     /*! Returns the user defined member groups */
-    virtual MemberGroupSDict *getMemberGroupSDict() const = 0;
+    virtual const MemberGroupList &getMemberGroups() const = 0;
 
     /*! Returns the classes contained in this namespace */
     virtual ClassLinkedRefMap getClasses() const = 0;
@@ -85,7 +94,7 @@ class NamespaceDef : public Definition
     virtual ClassLinkedRefMap getExceptions() const = 0;
 
     /*! Returns the namespaces contained in this namespace */
-    virtual const NamespaceSDict *getNamespaceSDict() const = 0;
+    virtual NamespaceLinkedRefMap getNamespaces() const = 0;
 
     virtual QCString title() const = 0;
     virtual QCString compoundTypeString() const = 0;
@@ -139,52 +148,5 @@ NamespaceDefMutable     *toNamespaceDefMutable(Definition *d);
 NamespaceDefMutable     *toNamespaceDefMutable(const Definition *d);
 
 //------------------------------------------------------------------------
-
-
-
-/** A list of NamespaceDef objects. */
-class NamespaceList : public QList<NamespaceDef>
-{
-  public:
-   ~NamespaceList() {}
-    int compareValues(const NamespaceDef *nd1,const NamespaceDef *nd2) const
-    {
-      return qstricmp(nd1->name(), nd2->name());
-    }
-};
-
-/** An iterator for NamespaceDef objects in a NamespaceList. */
-class NamespaceListIterator : public QListIterator<NamespaceDef>
-{
-  public:
-    NamespaceListIterator(const NamespaceList &l) :
-      QListIterator<NamespaceDef>(l) {}
-};
-
-/** An unsorted dictionary of NamespaceDef objects. */
-class NamespaceDict : public QDict<NamespaceDef>
-{
-  public:
-    NamespaceDict(uint size) : QDict<NamespaceDef>(size) {}
-   ~NamespaceDict() {}
-};
-
-/** A sorted dictionary of NamespaceDef objects. */
-class NamespaceSDict : public SDict<NamespaceDef>
-{
-  public:
-    NamespaceSDict(uint size=17) : SDict<NamespaceDef>(size) {}
-   ~NamespaceSDict() {}
-    void writeDeclaration(OutputList &ol,const char *title,
-            bool isConstantGroup=false, bool localName=FALSE);
-    bool declVisible() const;
-  private:
-    int compareValues(const NamespaceDef *item1,const NamespaceDef *item2) const
-    {
-      return qstricmp(item1->name(),item2->name());
-    }
-};
-
-
 
 #endif

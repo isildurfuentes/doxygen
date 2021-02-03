@@ -25,11 +25,10 @@
 %{
 
 #include <ctype.h>
+#include <stack>
 
 #include <qfile.h>
 #include <qstring.h>
-#include <qstack.h>
-#include <qdict.h>
 #include <qregexp.h>
 
 #include "doctokenizer.h"
@@ -72,6 +71,8 @@ static int          g_autoListLevel;
 
 struct DocLexerContext
 {
+  DocLexerContext(TokenInfo *tk,int r,int lvl,yy_size_t pos,const char *s,YY_BUFFER_STATE bs)
+    : token(tk), rule(r), autoListLevel(lvl), inputPos(pos), inputString(s), state(bs) {}
   TokenInfo *token;
   int rule;
   int autoListLevel;
@@ -80,7 +81,7 @@ struct DocLexerContext
   YY_BUFFER_STATE state;
 };
 
-static QStack<DocLexerContext> g_lexerStack;
+static std::stack< std::unique_ptr<DocLexerContext> > g_lexerStack;
 
 static int g_yyLineNr = 0;
 
@@ -94,28 +95,23 @@ static const char *stateToString(int state);
 
 void doctokenizerYYpushContext()
 {
-  DocLexerContext *ctx = new DocLexerContext;
-  ctx->rule = YY_START;
-  ctx->autoListLevel = g_autoListLevel;
-  ctx->token = g_token;
-  ctx->inputPos = g_inputPos;
-  ctx->inputString = g_inputString;
-  ctx->state = YY_CURRENT_BUFFER;
-  g_lexerStack.push(ctx);
+  g_lexerStack.push(
+      std::make_unique<DocLexerContext>(
+        g_token,YY_START,g_autoListLevel,g_inputPos,g_inputString,YY_CURRENT_BUFFER));
   yy_switch_to_buffer(yy_create_buffer(doctokenizerYYin, YY_BUF_SIZE));
 }
 
 bool doctokenizerYYpopContext()
 {
-  if (g_lexerStack.isEmpty()) return FALSE;
-  DocLexerContext *ctx = g_lexerStack.pop();
+  if (g_lexerStack.empty()) return FALSE;
+  const auto &ctx = g_lexerStack.top();
   g_autoListLevel = ctx->autoListLevel;
   g_inputPos = ctx->inputPos;
   g_inputString = ctx->inputString;
   yy_delete_buffer(YY_CURRENT_BUFFER);
   yy_switch_to_buffer(ctx->state);
   BEGIN(ctx->rule);
-  delete ctx;
+  g_lexerStack.pop();
   return TRUE;
 }
 
@@ -129,6 +125,7 @@ QCString extractPartAfterNewLine(const QCString &text)
   int nl2 = text.findRev("\\ilinebr");
   if (nl2!=-1)
   {
+    if (text.at(nl2+8)==' ') nl2++; // skip space after \\ilinebr
     return text.mid(nl2+8);
   }
   return text;
@@ -297,7 +294,7 @@ static void handleHtmlTag()
     }
     //printf("=====> Adding option name=<%s> value=<%s>\n",
     //    opt.name.data(),opt.value.data());
-    g_token->attribs.append(&opt);
+    g_token->attribs.push_back(opt);
   }
   g_token->attribsStr = tagText.mid(startAttribList,i-startAttribList);
 }
@@ -754,6 +751,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
 <St_Para,St_Text>[\-+0-9] |
 <St_Para,St_Text>{WORD1} |
 <St_Para,St_Text>{WORD2} { /* function call */
+                         if (QCString(yytext).find("\\ilinebr")!=-1) REJECT; // see issue #8311
                          lineCount(yytext,yyleng);
                          if (yytext[0]=='%') // strip % if present
                            g_token->name = &yytext[1];
@@ -810,7 +808,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
                          }
                          lineCount(yytext,yyleng);
                        }
-<St_Para>({BLANK}*\n)+{BLANK}*\n{BLANK}* {
+<St_Para>({BLANK}*(\n|"\\ilinebr"))+{BLANK}*(\n|"\\ilinebr"){BLANK}* {
                          lineCount(yytext,yyleng);
                          if (g_insidePre)
                          {
@@ -1041,6 +1039,7 @@ RCSID "$"("Author"|"Date"|"Header"|"Id"|"Locker"|"Log"|"Name"|"RCSfile"|"Revisio
 <St_TitleN>[\-+0-9]    |
 <St_TitleN>{WORD1}     |
 <St_TitleN>{WORD2}     { /* word */
+                         if (QCString(yytext).find("\\ilinebr")!=-1) REJECT; // see issue #8311
                          lineCount(yytext,yyleng);
                          if (yytext[0]=='%') // strip % if present
                            g_token->name = &yytext[1];

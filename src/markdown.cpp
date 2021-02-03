@@ -1649,7 +1649,7 @@ static bool isFencedCodeBlock(const char *data,int size,int refIndent,
   {
     if (data[i]==tildaChar)
     {
-      end=i-1;
+      end=i;
       int endTildes=0;
       while (i<size && data[i]==tildaChar) endTildes++,i++;
       while (i<size && data[i]==' ') i++;
@@ -2291,7 +2291,6 @@ void Markdown::writeFencedCodeBlock(const char *data,const char *lng,
     m_out.addStr("{"+lang+"}");
   }
   addStrEscapeUtf8Nbsp(data+blockStart,blockEnd-blockStart);
-  m_out.addStr(" ");
   m_out.addStr("@endcode");
 }
 
@@ -2400,7 +2399,41 @@ QCString Markdown::processBlocks(const QCString &s,int indent)
       QCString lang;
       blockIndent = indent;
       //printf("isHeaderLine(%s)=%d\n",QCString(data+i).left(size-i).data(),level);
-      if ((level=isHeaderline(data+i,size-i,TRUE))>0)
+      QCString endBlockName;
+      if (data[i]=='@' || data[i]=='\\') endBlockName = isBlockCommand(data+i,i,size-i);
+      if (!endBlockName.isEmpty())
+      {
+        // handle previous line
+        if (isLinkRef(data+pi,i-pi,id,link,title))
+        {
+          m_linkRefs.insert({id.lower().str(),LinkRef(link,title)});
+        }
+        else
+        {
+          writeOneLineHeaderOrRuler(data+pi,i-pi);
+        }
+        m_out.addChar(data[i]);
+        i++;
+        int l = endBlockName.length();
+        while (i<size-l)
+        {
+          if ((data[i]=='\\' || data[i]=='@') && // command
+              data[i-1]!='\\' && data[i-1]!='@') // not escaped
+          {
+            if (qstrncmp(&data[i+1],endBlockName,l)==0)
+            {
+              m_out.addChar(data[i]);
+              m_out.addStr(endBlockName);
+              pi=i;
+              i+=l+1;
+              break;
+            }
+          }
+          m_out.addChar(data[i]);
+          i++;
+        }
+      }
+      else if ((level=isHeaderline(data+i,size-i,TRUE))>0)
       {
         //printf("Found header at %d-%d\n",i,end);
         while (pi<size && data[pi]==' ') pi++;
@@ -2735,8 +2768,8 @@ void MarkdownOutlineParser::parseInput(const char *fileName,
   if (id.startsWith("autotoc_md")) id = "";
   int indentLevel=title.isEmpty() ? 0 : -1;
   markdown.setIndentLevel(indentLevel);
-  QCString titleFn = QFileInfo(fileName).baseName().utf8();
   QCString fn      = QFileInfo(fileName).fileName().utf8();
+  QCString titleFn = stripExtensionGeneral(fn,getFileNameExtension(fn));
   QCString mdfileAsMainPage = Config_getString(USE_MDFILE_AS_MAINPAGE);
   bool wasEmpty = id.isEmpty();
   if (wasEmpty) id = markdownFileNameToId(fileName);

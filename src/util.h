@@ -26,15 +26,14 @@
 #include <unordered_map>
 #include <algorithm>
 
-#include <qlist.h>
 #include <ctype.h>
 #include "types.h"
-#include "sortdict.h"
 #include "docparser.h"
 #include "classdef.h"
 #include "arguments.h"
 #include "containers.h"
 #include "namespacedef.h"
+#include "outputgen.h"
 
 //--------------------------------------------------------------------
 
@@ -47,11 +46,7 @@ class ArgumentList;
 class OutputList;
 class OutputDocInterface;
 class MemberDef;
-class ExampleSDict;
 class GroupDef;
-class NamespaceSDict;
-class ClassList;
-class MemberGroupSDict;
 struct TagInfo;
 class PageDef;
 class SectionInfo;
@@ -90,32 +85,6 @@ class TextGeneratorOLImpl : public TextGeneratorIntf
                   ) const;
   private:
     OutputDocInterface &m_od;
-};
-
-//--------------------------------------------------------------------
-
-/** @brief maps a unicode character code to a list of T::ElementType's
- */
-template<class T>
-class LetterToIndexMap : public SIntDict<T>
-{
-  public:
-    LetterToIndexMap() { SIntDict<T>::setAutoDelete(TRUE); }
-    void append(uint letter,typename T::ElementType *elem)
-    {
-      T *l = SIntDict<T>::find((int)letter);
-      if (l==0)
-      {
-        l = new T(letter);
-        SIntDict<T>::inSort((int)letter,l);
-      }
-      l->append(elem);
-    }
-  private:
-    int compareValues(const T *l1, const T *l2) const
-    {
-      return (int)l1->letter()-(int)l2->letter();
-    }
 };
 
 //--------------------------------------------------------------------
@@ -196,8 +165,8 @@ QCString substituteClassNames(const QCString &s);
 
 
 QCString clearBlock(const char *s,const char *begin,const char *end);
-
-QCString selectBlock(const QCString& s,const QCString &name,bool which);
+QCString selectBlock(const QCString& s,const QCString &name,bool enable, OutputGenerator::OutputType o);
+QCString removeEmptyLines(const QCString &s);
 
 QCString resolveDefines(const char *n);
 
@@ -233,7 +202,7 @@ QCString tempArgListToString(const ArgumentList &al,SrcLangExt lang,bool include
 
 QCString generateMarker(int id);
 
-void writeExample(OutputList &ol,ExampleSDict *el);
+void writeExamples(OutputList &ol,const ExampleList &el);
 
 QCString stripAnonymousNamespaceScope(const QCString &s);
 
@@ -291,7 +260,7 @@ QCString convertToPSString(const char *s);
 QCString getOverloadDocs();
 
 void addMembersToMemberGroup(/* in,out */ MemberList *ml,
-                             /* in,out */ MemberGroupSDict **ppMemberGroupSDict,
+                             /* in,out */ MemberGroupList *pMemberGroups,
                              /* in */     const Definition *context);
 
 int extractClassNameFromType(const QCString &type,int &pos,
@@ -407,7 +376,7 @@ QCString extractAliasArgs(const QCString &args,int pos);
 int countAliasArguments(const QCString argList);
 
 QCString resolveAliasCmd(const QCString aliasCmd);
-QCString expandAlias(const QCString &aliasName,const QCString &aliasValue);
+std::string expandAlias(const std::string &aliasName,const std::string &aliasValue);
 
 void writeTypeConstraints(OutputList &ol,const Definition *d,const ArgumentList &al);
 

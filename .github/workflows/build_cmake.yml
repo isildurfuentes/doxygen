@@ -12,27 +12,31 @@ jobs:
         config:
         - {
             name: "Ubuntu Latest GCC Release",
-            os: ubuntu-latest,
+            os: ubuntu-18.04,
             build_type: "Release", cc: "gcc", cxx: "g++",
-            build_gen: "Unix Makefiles"
+            build_gen: "Unix Makefiles",
+            cmake_extra_opts: "-Dbuild_search=YES -Dbuild_app=YES -Dbuild_parse=YES -Dbuild_xmlparser=YES -Duse_sqlite3=ON"
           }
         - {
             name: "Ubuntu Latest GCC Debug",
-            os: ubuntu-latest,
+            os: ubuntu-18.04,
             build_type: "Debug", cc: "gcc", cxx: "g++",
-            build_gen: "Unix Makefiles"
+            build_gen: "Unix Makefiles",
+            cmake_extra_opts: "-Dbuild_search=YES -Dbuild_app=YES -Dbuild_parse=YES -Dbuild_xmlparser=YES -Duse_sqlite3=ON"
           }
         - {
             name: "Ubuntu Latest Clang Release",
-            os: ubuntu-latest,
+            os: ubuntu-20.04,
             build_type: "Release", cc: "clang", cxx: "clang++",
-            build_gen: "Unix Makefiles"
+            build_gen: "Unix Makefiles",
+            cmake_extra_opts: "-Duse_libclang=YES -Dstatic_libclang=YES -Duse_libc++=NO -Duse_sqlite3=ON"
           }
         - {
             name: "Ubuntu Latest Clang Debug",
-            os: ubuntu-latest,
+            os: ubuntu-20.04,
             build_type: "Debug", cc: "clang", cxx: "clang++",
-            build_gen: "Unix Makefiles"
+            build_gen: "Unix Makefiles",
+            cmake_extra_opts: "-Duse_libclang=YES -Dstatic_libclang=YES -Duse_libc++=NO -Duse_sqlite3=ON"
           }
         - {
             name: "macOS Latest Release",
@@ -69,11 +73,11 @@ jobs:
         Do {
           $attemptCount++;
           Try {
-            $wc.DownloadFile("https://ctan.math.illinois.edu/systems/win32/miktex/setup/windows-x64/miktexsetup-4.0-x64.zip","miktexsetup-4.0-x64.zip")
+            $wc.DownloadFile("https://ctan.math.illinois.edu/systems/win32/miktex/setup/windows-x64/miktexsetup-4.1-x64.zip","miktexsetup-4.1-x64.zip")
           } Catch [Exception] {
             Write-Host $_.Exception | format-list -force
           }
-        } while (((Test-Path "miktexsetup-x64.zip") -eq $false) -and ($attemptCount -le $maxAttempts))  
+        } while (((Test-Path "miktexsetup-4.1-x64.zip") -eq $false) -and ($attemptCount -le $maxAttempts))  
       shell: pwsh
       if: matrix.config.os == 'windows-latest'
       
@@ -84,8 +88,8 @@ jobs:
       if: matrix.config.os == 'windows-latest'
 
     - name: Install LaTeX (Linux)
-      run: sudo apt-get install texlive texlive-generic-recommended texlive-extra-utils texlive-latex-extra texlive-font-utils
-      if: matrix.config.os == 'ubuntu-latest'
+      run: sudo apt-get install texlive texlive-latex-recommended texlive-extra-utils texlive-latex-extra texlive-font-utils
+      if: startsWith(matrix.config.os,'ubuntu-')
 
     - name: Install LaTeX (MacOS)
       run: |
@@ -93,16 +97,35 @@ jobs:
         echo "/Library/TeX/texbin/" >> $GITHUB_PATH
       if: matrix.config.os == 'macos-latest'
     
+    - name: Install libclang (Ubuntu 20.04)
+      run: |
+        sudo apt remove llvm-8 clang-8 libclang-common-8-dev clang-format-8 libllvm8
+        sudo apt remove llvm-9 llvm-9-dev llvm-9-tools llvm-9-runtime clang-9 libclang-common-9-dev clang-format-9 libllvm9
+        #sudo apt remove llvm-10 llvm-10-dev llvm-10-tools llvm-10-runtime clang-10 clang-format-10 libclang-common-10-dev libclang-cpp10 libclang1-10 libllvm10  
+        sudo apt-get autoremove
+        sudo apt-get clean
+        #sudo apt install libclang-9-dev libclang-common-9-dev
+        sudo apt install libclang-10-dev libclang-common-10-dev
+        apt list --installed | egrep '(clang|llvm)'
+        ls -d /usr/lib/llvm-*/include/
+        clang++ -v
+      if: matrix.config.os == 'ubuntu-20.04'
+    
+    - name: Install libxapian (Ubuntu 18.04)
+      run: |
+        sudo apt install libxapian-dev
+      if: matrix.config.os == 'ubuntu-18.04'
+          
     - name: Extract MikTex zip (Windows)
       shell: bash
       run: |
-        unzip miktexsetup-4.0-x64.zip
+        unzip miktexsetup-4.1-x64.zip
       if: matrix.config.os == 'windows-latest'
 
     - name: Download MikTex packages (Windows)
       shell: bash
       run: |
-        ./miktexsetup --verbose \
+        ./miktexsetup_standalone --verbose \
                       --local-package-repository=C:/miktex-repository \
                       --remote-package-repository="https://ctan.math.illinois.edu/systems/win32/miktex/tm/packages/" \
                       --package-set=essential \
@@ -112,7 +135,7 @@ jobs:
     - name: Install MikTex packages (Windows)
       shell: bash
       run: |
-        ./miktexsetup --local-package-repository=C:/miktex-repository \
+        ./miktexsetup_standalone --local-package-repository=C:/miktex-repository \
                       --package-set=essential \
                       --shared \
                       install
@@ -130,7 +153,7 @@ jobs:
 
     - name: Install Ghostscript (Linux)
       run: sudo apt-get install ghostscript
-      if: matrix.config.os == 'ubuntu-latest'
+      if: startsWith(matrix.config.os,'ubuntu-')
     
     - name: Install Ghostscript (Windows)
       run:
@@ -148,7 +171,7 @@ jobs:
       
     - name: Install xmllint (Linux)
       run: sudo apt-get install libxml2-utils
-      if: matrix.config.os == 'ubuntu-latest'
+      if: startsWith(matrix.config.os,'ubuntu-')
 
     - name: Install xmllint (MacOS)
       run: brew install libxml2
@@ -167,7 +190,7 @@ jobs:
 
     - name: Install Graphviz (Linux)
       run: sudo apt-get install graphviz
-      if: matrix.config.os == 'ubuntu-latest'
+      if: startsWith(matrix.config.os,'ubuntu-')
 
     - name: Install Graphviz (MacOS)
       run: brew install graphviz
@@ -191,6 +214,9 @@ jobs:
       run:
         refreshenv
       if: matrix.config.os == 'windows-latest'
+    
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v2
     
     - name: Check tool versions (Linux / MacOS)
       shell: bash
@@ -255,9 +281,8 @@ jobs:
             -D CMAKE_BUILD_TYPE=${{ matrix.config.build_type }}
             -G "${{ matrix.config.build_gen }}"
             -Dbuild_doc=YES
-            -Dbuild_app=YES
-            -Dbuild_parse=YES
-            -Dbuild_xmlparser=YES            
+            -Dbuild_wizard=YES
+            ${{ matrix.config.cmake_extra_opts }}            
           RESULT_VARIABLE result
         )
         if (NOT result EQUAL 0)
@@ -282,6 +307,12 @@ jobs:
           message("::error::${error_message}")
           message(FATAL_ERROR "Build failed")
         endif()
+
+    - name: Archive build artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: "${{ matrix.config.name }} build artifacts"
+        path: build/bin/
 
     - name: Run tests (Linux / MacOS)
       shell: cmake -P {0}

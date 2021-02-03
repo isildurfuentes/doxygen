@@ -823,13 +823,10 @@ SqlStmt memberdef_param_insert={
   ,NULL
 };
 
-
 class TextGeneratorSqlite3Impl : public TextGeneratorIntf
 {
   public:
-    TextGeneratorSqlite3Impl(StringList &l) : l(l) {
-      l.setAutoDelete(TRUE);
-    }
+    TextGeneratorSqlite3Impl(StringVector &l) : m_list(l) { }
     void writeString(const char * /*s*/,bool /*keepSpaces*/) const
     {
     }
@@ -841,15 +838,16 @@ class TextGeneratorSqlite3Impl : public TextGeneratorIntf
                    const char *anchor,const char * /*text*/
                   ) const
     {
-      QCString *rs=new QCString(file);
+      std::string rs = file;
       if (anchor)
       {
-        rs->append("_1").append(anchor);
+        rs+="_1";
+        rs+=anchor;
       }
-      l.append(rs);
+      m_list.push_back(rs);
     }
   private:
-    StringList &l;
+    StringVector &m_list;
     // the list is filled by linkifyText and consumed by the caller
 };
 
@@ -1019,10 +1017,6 @@ static void insertMemberFunctionParams(int memberdef_id, const MemberDef *md, co
   const ArgumentList &defAl = md->argumentList();
   if (declAl.size()>0)
   {
-//    ArgumentListIterator declAli(*declAl);
-//    ArgumentListIterator defAli(*defAl);
-//    const Argument *a;
-//    for (declAli.toFirst();(a=declAli.current());++declAli)
     auto defIt = defAl.begin();
     for (const Argument &a : declAl)
     {
@@ -1041,18 +1035,15 @@ static void insertMemberFunctionParams(int memberdef_id, const MemberDef *md, co
       }
       if (!a.type.isEmpty())
       {
-        StringList l;
-        linkifyText(TextGeneratorSqlite3Impl(l),def,md->getBodyDef(),md,a.type);
+        StringVector list;
+        linkifyText(TextGeneratorSqlite3Impl(list),def,md->getBodyDef(),md,a.type);
 
-        StringListIterator li(l);
-        QCString *s;
-        while ((s=li.current()))
+        for (const auto &s : list)
         {
           QCString qsrc_refid = md->getOutputFileBase() + "_1" + md->anchor();
           struct Refid src_refid = insertRefid(qsrc_refid);
-          struct Refid dst_refid = insertRefid(s->data());
+          struct Refid dst_refid = insertRefid(s.c_str());
           insertMemberReference(src_refid,dst_refid, "argument");
-          ++li;
         }
         bindTextParameter(param_select,":type",a.type);
         bindTextParameter(param_insert,":type",a.type);
@@ -1074,8 +1065,8 @@ static void insertMemberFunctionParams(int memberdef_id, const MemberDef *md, co
       }
       if (!a.defval.isEmpty())
       {
-        StringList l;
-        linkifyText(TextGeneratorSqlite3Impl(l),def,md->getBodyDef(),md,a.defval);
+        StringVector list;
+        linkifyText(TextGeneratorSqlite3Impl(list),def,md->getBodyDef(),md,a.defval);
         bindTextParameter(param_select,":defval",a.defval);
         bindTextParameter(param_insert,":defval",a.defval);
       }
@@ -1279,13 +1270,9 @@ static void writeInnerClasses(const ClassLinkedRefMap &cl, struct Refid outer_re
   }
 }
 
-static void writeInnerPages(const PageSDict *pl, struct Refid outer_refid)
+static void writeInnerPages(const PageLinkedRefMap &pl, struct Refid outer_refid)
 {
-  if (!pl) return;
-
-  PageSDict::Iterator pli(*pl);
-  const PageDef *pd;
-  for (pli.toFirst();(pd=pli.current());++pli)
+  for (const auto &pd : pl)
   {
     struct Refid inner_refid = insertRefid(
       pd->getGroupDef() ? pd->getOutputFileBase()+"_"+pd->name() : pd->getOutputFileBase()
@@ -1294,41 +1281,30 @@ static void writeInnerPages(const PageSDict *pl, struct Refid outer_refid)
     bindIntParameter(contains_insert,":inner_rowid", inner_refid.rowid);
     bindIntParameter(contains_insert,":outer_rowid", outer_refid.rowid);
     step(contains_insert);
-
   }
 }
 
-static void writeInnerGroups(const GroupList *gl, struct Refid outer_refid)
+static void writeInnerGroups(const GroupList &gl, struct Refid outer_refid)
 {
-  if (gl)
+  for (const auto &sgd : gl)
   {
-    GroupListIterator gli(*gl);
-    const GroupDef *sgd;
-    for (gli.toFirst();(sgd=gli.current());++gli)
-    {
-      struct Refid inner_refid = insertRefid(sgd->getOutputFileBase());
+    struct Refid inner_refid = insertRefid(sgd->getOutputFileBase());
 
-      bindIntParameter(contains_insert,":inner_rowid", inner_refid.rowid);
-      bindIntParameter(contains_insert,":outer_rowid", outer_refid.rowid);
-      step(contains_insert);
-    }
+    bindIntParameter(contains_insert,":inner_rowid", inner_refid.rowid);
+    bindIntParameter(contains_insert,":outer_rowid", outer_refid.rowid);
+    step(contains_insert);
   }
 }
 
-static void writeInnerFiles(const FileList *fl, struct Refid outer_refid)
+static void writeInnerFiles(const FileList &fl, struct Refid outer_refid)
 {
-  if (fl)
+  for (const auto &fd: fl)
   {
-    QListIterator<FileDef> fli(*fl);
-    const FileDef *fd;
-    for (fli.toFirst();(fd=fli.current());++fli)
-    {
-      struct Refid inner_refid = insertRefid(fd->getOutputFileBase());
+    struct Refid inner_refid = insertRefid(fd->getOutputFileBase());
 
-      bindIntParameter(contains_insert,":inner_rowid", inner_refid.rowid);
-      bindIntParameter(contains_insert,":outer_rowid", outer_refid.rowid);
-      step(contains_insert);
-    }
+    bindIntParameter(contains_insert,":inner_rowid", inner_refid.rowid);
+    bindIntParameter(contains_insert,":outer_rowid", outer_refid.rowid);
+    step(contains_insert);
   }
 }
 
@@ -1344,22 +1320,17 @@ static void writeInnerDirs(const DirList &dl, struct Refid outer_refid)
   }
 }
 
-static void writeInnerNamespaces(const NamespaceSDict *nl, struct Refid outer_refid)
+static void writeInnerNamespaces(const NamespaceLinkedRefMap &nl, struct Refid outer_refid)
 {
-  if (nl)
+  for (const auto &nd : nl)
   {
-    NamespaceSDict::Iterator nli(*nl);
-    const NamespaceDef *nd;
-    for (nli.toFirst();(nd=nli.current());++nli)
+    if (!nd->isHidden() && !nd->isAnonymous())
     {
-      if (!nd->isHidden() && !nd->isAnonymous())
-      {
-        struct Refid inner_refid = insertRefid(nd->getOutputFileBase());
+      struct Refid inner_refid = insertRefid(nd->getOutputFileBase());
 
-        bindIntParameter(contains_insert,":inner_rowid",inner_refid.rowid);
-        bindIntParameter(contains_insert,":outer_rowid",outer_refid.rowid);
-        step(contains_insert);
-      }
+      bindIntParameter(contains_insert,":inner_rowid",inner_refid.rowid);
+      bindIntParameter(contains_insert,":outer_rowid",outer_refid.rowid);
+      step(contains_insert);
     }
   }
 }
@@ -1428,7 +1399,7 @@ QCString getSQLDocBlock(const Definition *scope,
   );
   XMLCodeGenerator codeGen(t);
   // create a parse tree visitor for XML
-  XmlDocVisitor *visitor = new XmlDocVisitor(t,codeGen);
+  XmlDocVisitor *visitor = new XmlDocVisitor(t,codeGen,scope?scope->getDefFileExtension():QCString(""));
   root->accept(visitor);
   delete visitor;
   delete root;
@@ -1742,8 +1713,8 @@ static void generateSqlite3ForMember(const MemberDef *md, struct Refid scope_ref
     }
     QCString typeStr = md->typeString();
     stripQualifiers(typeStr);
-    StringList l;
-    linkifyText(TextGeneratorSqlite3Impl(l), def, md->getBodyDef(),md,typeStr);
+    StringVector list;
+    linkifyText(TextGeneratorSqlite3Impl(list), def, md->getBodyDef(),md,typeStr);
     if (typeStr)
     {
       bindTextParameter(memberdef_insert,":type",typeStr);
@@ -1767,25 +1738,22 @@ static void generateSqlite3ForMember(const MemberDef *md, struct Refid scope_ref
   {
     bindTextParameter(memberdef_insert,":initializer",md->initializer());
 
-    StringList l;
-    linkifyText(TextGeneratorSqlite3Impl(l),def,md->getBodyDef(),md,md->initializer());
-    StringListIterator li(l);
-    QCString *s;
-    while ((s=li.current()))
+    StringVector list;
+    linkifyText(TextGeneratorSqlite3Impl(list),def,md->getBodyDef(),md,md->initializer());
+    for (const auto &s : list)
     {
       if (md->getBodyDef())
       {
         DBG_CTX(("initializer:%s %s %s %d\n",
               md->anchor().data(),
-              s->data(),
+              s.c_str(),
               md->getBodyDef()->getDefFileName().data(),
               md->getStartBodyLine()));
         QCString qsrc_refid = md->getOutputFileBase() + "_1" + md->anchor();
         struct Refid src_refid = insertRefid(qsrc_refid);
-        struct Refid dst_refid = insertRefid(s->data());
+        struct Refid dst_refid = insertRefid(s.c_str());
         insertMemberReference(src_refid,dst_refid, "initializer");
       }
-      ++li;
     }
   }
 
@@ -1842,14 +1810,12 @@ static void generateSqlite3ForMember(const MemberDef *md, struct Refid scope_ref
   // + source references
   // The cross-references in initializers only work when both the src and dst
   // are defined.
-  auto refList = md->getReferencesMembers();
-  for (const auto &refmd : refList)
+  for (const auto &refmd : md->getReferencesMembers())
   {
     insertMemberReference(md,refmd, "inline");
   }
   // + source referenced by
-  auto refByList = md->getReferencedByMembers();
-  for (const auto &refmd : refByList)
+  for (const auto &refmd : md->getReferencedByMembers())
   {
     insertMemberReference(refmd,md, "inline");
   }
@@ -1863,10 +1829,7 @@ static void generateSqlite3Section( const Definition *d,
                       const char * /*documentation*/=0)
 {
   if (ml==0) return;
-  MemberListIterator mli(*ml);
-  const MemberDef *md;
-
-  for (mli.toFirst();(md=mli.current());++mli)
+  for (const auto &md : *ml)
   {
     // TODO: necessary? just tracking what xmlgen does; xmlgen says:
     // namespace members are also inserted in the file scope, but
@@ -1884,7 +1847,7 @@ static void associateAllClassMembers(const ClassDef *cd, struct Refid scope_refi
   {
     for (auto &mi : *mni)
     {
-      MemberDef *md = mi->memberDef();
+      const MemberDef *md = mi->memberDef();
       QCString qrefid = md->getOutputFileBase() + "_1" + md->anchor();
       associateMember(md, insertRefid(qrefid), scope_refid);
     }
@@ -1958,7 +1921,7 @@ static void generateSqlite3ForClass(const ClassDef *cd)
   other values if there's a solid heuristic for *when a class will
   have a header file*.
   */
-  IncludeInfo *ii=cd->includeInfo();
+  const IncludeInfo *ii=cd->includeInfo();
   if (ii)
   {
     QCString nm = ii->includeName;
@@ -2020,25 +1983,18 @@ static void generateSqlite3ForClass(const ClassDef *cd)
   writeTemplateList(cd);
 
   // + member groups
-  if (cd->getMemberGroupSDict())
+  for (const auto &mg : cd->getMemberGroups())
   {
-    MemberGroupSDict::Iterator mgli(*cd->getMemberGroupSDict());
-    MemberGroup *mg;
-    for (;(mg=mgli.current());++mgli)
-    {
-      generateSqlite3Section(cd,mg->members(),refid,"user-defined",mg->header(),
-          mg->documentation());
-    }
+    generateSqlite3Section(cd,&mg->members(),refid,"user-defined",mg->header(),
+        mg->documentation());
   }
 
   // this is just a list of *local* members
-  QListIterator<MemberList> mli(cd->getMemberLists());
-  MemberList *ml;
-  for (mli.toFirst();(ml=mli.current());++mli)
+  for (const auto &ml : cd->getMemberLists())
   {
     if ((ml->listType()&MemberListType_detailedLists)==0)
     {
-      generateSqlite3Section(cd,ml,refid,"user-defined");
+      generateSqlite3Section(cd,ml.get(),refid,"user-defined");
     }
   }
 
@@ -2081,28 +2037,21 @@ static void generateSqlite3ForNamespace(const NamespaceDef *nd)
   writeInnerClasses(nd->getClasses(),refid);
 
   // + contained namespace definitions
-  writeInnerNamespaces(nd->getNamespaceSDict(),refid);
+  writeInnerNamespaces(nd->getNamespaces(),refid);
 
   // + member groups
-  if (nd->getMemberGroupSDict())
+  for (const auto &mg : nd->getMemberGroups())
   {
-    MemberGroupSDict::Iterator mgli(*nd->getMemberGroupSDict());
-    MemberGroup *mg;
-    for (;(mg=mgli.current());++mgli)
-    {
-      generateSqlite3Section(nd,mg->members(),refid,"user-defined",mg->header(),
-          mg->documentation());
-    }
+    generateSqlite3Section(nd,&mg->members(),refid,"user-defined",mg->header(),
+        mg->documentation());
   }
 
   // + normal members
-  QListIterator<MemberList> mli(nd->getMemberLists());
-  MemberList *ml;
-  for (mli.toFirst();(ml=mli.current());++mli)
+  for (const auto &ml : nd->getMemberLists())
   {
     if ((ml->listType()&MemberListType_declarationLists)!=0)
     {
-      generateSqlite3Section(nd,ml,refid,"user-defined");
+      generateSqlite3Section(nd,ml.get(),refid,"user-defined");
     }
   }
 }
@@ -2145,97 +2094,88 @@ static void generateSqlite3ForFile(const FileDef *fd)
   step(compounddef_insert);
 
   // + includes files
-  IncludeInfo *ii;
-  if (fd->includeFileList())
+  for (const auto &ii : fd->includeFileList())
   {
-    QListIterator<IncludeInfo> ili(*fd->includeFileList());
-    for (ili.toFirst();(ii=ili.current());++ili)
+    int src_id=insertPath(fd->absFilePath(),!fd->isReference());
+    int dst_id;
+    QCString dst_path;
+
+    if(ii.fileDef) // found file
     {
-      int src_id=insertPath(fd->absFilePath(),!fd->isReference());
-      int dst_id;
-      QCString dst_path;
-
-      if(ii->fileDef) // found file
+      if(ii.fileDef->isReference())
       {
-        if(ii->fileDef->isReference())
-        {
-          // strip tagfile from path
-          QCString tagfile = ii->fileDef->getReference();
-          dst_path = ii->fileDef->absFilePath().copy();
-          dst_path.stripPrefix(tagfile+":");
-        }
-        else
-        {
-          dst_path = ii->fileDef->absFilePath();
-        }
-        dst_id = insertPath(dst_path,ii->local);
+        // strip tagfile from path
+        QCString tagfile = ii.fileDef->getReference();
+        dst_path = ii.fileDef->absFilePath().copy();
+        dst_path.stripPrefix(tagfile+":");
       }
-      else // can't find file
+      else
       {
-        dst_id = insertPath(ii->includeName,ii->local,FALSE);
+        dst_path = ii.fileDef->absFilePath();
       }
+      dst_id = insertPath(dst_path,ii.local);
+    }
+    else // can't find file
+    {
+      dst_id = insertPath(ii.includeName,ii.local,FALSE);
+    }
 
-      DBG_CTX(("-----> FileDef includeInfo for %s\n", ii->includeName.data()));
-      DBG_CTX(("       local:    %d\n", ii->local));
-      DBG_CTX(("       imported: %d\n", ii->imported));
-      if(ii->fileDef)
-      {
-        DBG_CTX(("include: %s\n", ii->fileDef->absFilePath().data()));
-      }
-      DBG_CTX(("       src_id  : %d\n", src_id));
-      DBG_CTX(("       dst_id: %d\n", dst_id));
+    DBG_CTX(("-----> FileDef includeInfo for %s\n", ii.includeName.data()));
+    DBG_CTX(("       local:    %d\n", ii.local));
+    DBG_CTX(("       imported: %d\n", ii.imported));
+    if(ii.fileDef)
+    {
+      DBG_CTX(("include: %s\n", ii.fileDef->absFilePath().data()));
+    }
+    DBG_CTX(("       src_id  : %d\n", src_id));
+    DBG_CTX(("       dst_id: %d\n", dst_id));
 
-      bindIntParameter(incl_select,":local",ii->local);
-      bindIntParameter(incl_select,":src_id",src_id);
-      bindIntParameter(incl_select,":dst_id",dst_id);
-      if (step(incl_select,TRUE,TRUE)==0) {
-        bindIntParameter(incl_insert,":local",ii->local);
-        bindIntParameter(incl_insert,":src_id",src_id);
-        bindIntParameter(incl_insert,":dst_id",dst_id);
-        step(incl_insert);
-      }
+    bindIntParameter(incl_select,":local",ii.local);
+    bindIntParameter(incl_select,":src_id",src_id);
+    bindIntParameter(incl_select,":dst_id",dst_id);
+    if (step(incl_select,TRUE,TRUE)==0) {
+      bindIntParameter(incl_insert,":local",ii.local);
+      bindIntParameter(incl_insert,":src_id",src_id);
+      bindIntParameter(incl_insert,":dst_id",dst_id);
+      step(incl_insert);
     }
   }
 
   // + includedby files
-  if (fd->includedByFileList())
+  for (const auto &ii : fd->includedByFileList())
   {
-    QListIterator<IncludeInfo> ili(*fd->includedByFileList());
-    for (ili.toFirst();(ii=ili.current());++ili)
+    int dst_id=insertPath(fd->absFilePath(),!fd->isReference());
+    int src_id;
+    QCString src_path;
+
+    if(ii.fileDef) // found file
     {
-      int dst_id=insertPath(fd->absFilePath(),!fd->isReference());
-      int src_id;
-      QCString src_path;
-
-      if(ii->fileDef) // found file
+      if(ii.fileDef->isReference())
       {
-        if(ii->fileDef->isReference())
-        {
-          // strip tagfile from path
-          QCString tagfile = ii->fileDef->getReference();
-          src_path = ii->fileDef->absFilePath().copy();
-          src_path.stripPrefix(tagfile+":");
-        }
-        else
-        {
-          src_path = ii->fileDef->absFilePath();
-        }
-        src_id = insertPath(src_path,ii->local);
+        // strip tagfile from path
+        QCString tagfile = ii.fileDef->getReference();
+        src_path = ii.fileDef->absFilePath().copy();
+        src_path.stripPrefix(tagfile+":");
       }
-      else // can't find file
+      else
       {
-        src_id = insertPath(ii->includeName,ii->local,FALSE);
+        src_path = ii.fileDef->absFilePath();
       }
+      src_id = insertPath(src_path,ii.local);
+    }
+    else // can't find file
+    {
+      src_id = insertPath(ii.includeName,ii.local,FALSE);
+    }
 
-      bindIntParameter(incl_select,":local",ii->local);
-      bindIntParameter(incl_select,":src_id",src_id);
-      bindIntParameter(incl_select,":dst_id",dst_id);
-      if (step(incl_select,TRUE,TRUE)==0) {
-        bindIntParameter(incl_insert,":local",ii->local);
-        bindIntParameter(incl_insert,":src_id",src_id);
-        bindIntParameter(incl_insert,":dst_id",dst_id);
-        step(incl_insert);
-      }
+    bindIntParameter(incl_select,":local",ii.local);
+    bindIntParameter(incl_select,":src_id",src_id);
+    bindIntParameter(incl_select,":dst_id",dst_id);
+    if (step(incl_select,TRUE,TRUE)==0) {
+      bindIntParameter(incl_insert,":local",ii.local);
+      bindIntParameter(incl_insert,":src_id",src_id);
+      bindIntParameter(incl_insert,":dst_id",dst_id);
+      step(incl_insert);
     }
   }
 
@@ -2243,31 +2183,21 @@ static void generateSqlite3ForFile(const FileDef *fd)
   writeInnerClasses(fd->getClasses(),refid);
 
   // + contained namespace definitions
-  if (fd->getNamespaceSDict())
-  {
-    writeInnerNamespaces(fd->getNamespaceSDict(),refid);
-  }
+  writeInnerNamespaces(fd->getNamespaces(),refid);
 
   // + member groups
-  if (fd->getMemberGroupSDict())
+  for (const auto &mg : fd->getMemberGroups())
   {
-    MemberGroupSDict::Iterator mgli(*fd->getMemberGroupSDict());
-    MemberGroup *mg;
-    for (;(mg=mgli.current());++mgli)
-    {
-      generateSqlite3Section(fd,mg->members(),refid,"user-defined",mg->header(),
+    generateSqlite3Section(fd,&mg->members(),refid,"user-defined",mg->header(),
           mg->documentation());
-    }
   }
 
   // + normal members
-  QListIterator<MemberList> mli(fd->getMemberLists());
-  MemberList *ml;
-  for (mli.toFirst();(ml=mli.current());++mli)
+  for (const auto &ml : fd->getMemberLists())
   {
     if ((ml->listType()&MemberListType_declarationLists)!=0)
     {
-      generateSqlite3Section(fd,ml,refid,"user-defined");
+      generateSqlite3Section(fd,ml.get(),refid,"user-defined");
     }
   }
 }
@@ -2323,25 +2253,18 @@ static void generateSqlite3ForGroup(const GroupDef *gd)
   writeInnerGroups(gd->getSubGroups(),refid);
 
   // + member groups
-  if (gd->getMemberGroupSDict())
+  for (const auto &mg : gd->getMemberGroups())
   {
-    MemberGroupSDict::Iterator mgli(*gd->getMemberGroupSDict());
-    MemberGroup *mg;
-    for (;(mg=mgli.current());++mgli)
-    {
-      generateSqlite3Section(gd,mg->members(),refid,"user-defined",mg->header(),
-          mg->documentation());
-    }
+    generateSqlite3Section(gd,&mg->members(),refid,"user-defined",mg->header(),
+        mg->documentation());
   }
 
   // + members
-  QListIterator<MemberList> mli(gd->getMemberLists());
-  MemberList *ml;
-  for (mli.toFirst();(ml=mli.current());++mli)
+  for (const auto &ml : gd->getMemberLists())
   {
     if ((ml->listType()&MemberListType_declarationLists)!=0)
     {
-      generateSqlite3Section(gd,ml,refid,"user-defined");
+      generateSqlite3Section(gd,ml.get(),refid,"user-defined");
     }
   }
 }
@@ -2421,7 +2344,7 @@ static void generateSqlite3ForPage(const PageDef *pd,bool isExample)
   bindTextParameter(compounddef_insert,":name",pd->name());
 
   QCString title;
-  if (pd==Doxygen::mainPage) // main page is special
+  if (pd==Doxygen::mainPage.get()) // main page is special
   {
     if (mainPageHasTitle())
     {
@@ -2555,12 +2478,10 @@ void generateSqlite3()
   }
 
   // + namespaces
-  NamespaceSDict::Iterator nli(*Doxygen::namespaceSDict);
-  const NamespaceDef *nd;
-  for (nli.toFirst();(nd=nli.current());++nli)
+  for (const auto &nd : *Doxygen::namespaceLinkedMap)
   {
     msg("Generating Sqlite3 output for namespace %s\n",nd->name().data());
-    generateSqlite3ForNamespace(nd);
+    generateSqlite3ForNamespace(nd.get());
   }
 
   // + files
@@ -2574,52 +2495,38 @@ void generateSqlite3()
   }
 
   // + groups
-  GroupSDict::Iterator gli(*Doxygen::groupSDict);
-  const GroupDef *gd;
-  for (;(gd=gli.current());++gli)
+  for (const auto &gd : *Doxygen::groupLinkedMap)
   {
     msg("Generating Sqlite3 output for group %s\n",gd->name().data());
-    generateSqlite3ForGroup(gd);
+    generateSqlite3ForGroup(gd.get());
   }
 
   // + page
+  for (const auto &pd : *Doxygen::pageLinkedMap)
   {
-    PageSDict::Iterator pdi(*Doxygen::pageSDict);
-    const PageDef *pd=0;
-    for (pdi.toFirst();(pd=pdi.current());++pdi)
-    {
-      msg("Generating Sqlite3 output for page %s\n",pd->name().data());
-      generateSqlite3ForPage(pd,FALSE);
-    }
+    msg("Generating Sqlite3 output for page %s\n",pd->name().data());
+    generateSqlite3ForPage(pd.get(),FALSE);
   }
 
   // + dirs
+  for (const auto &dd : *Doxygen::dirLinkedMap)
   {
-    const DirDef *dir;
-    DirSDict::Iterator sdi(*Doxygen::directories);
-    for (sdi.toFirst();(dir=sdi.current());++sdi)
-    {
-      msg("Generating Sqlite3 output for dir %s\n",dir->name().data());
-      generateSqlite3ForDir(dir);
-    }
+    msg("Generating Sqlite3 output for dir %s\n",dd->name().data());
+    generateSqlite3ForDir(dd.get());
   }
 
   // + examples
+  for (const auto &pd : *Doxygen::exampleLinkedMap)
   {
-    PageSDict::Iterator pdi(*Doxygen::exampleSDict);
-    const PageDef *pd=0;
-    for (pdi.toFirst();(pd=pdi.current());++pdi)
-    {
-      msg("Generating Sqlite3 output for example %s\n",pd->name().data());
-      generateSqlite3ForPage(pd,TRUE);
-    }
+    msg("Generating Sqlite3 output for example %s\n",pd->name().data());
+    generateSqlite3ForPage(pd.get(),TRUE);
   }
 
   // + main page
   if (Doxygen::mainPage)
   {
     msg("Generating Sqlite3 output for the main page\n");
-    generateSqlite3ForPage(Doxygen::mainPage,FALSE);
+    generateSqlite3ForPage(Doxygen::mainPage.get(),FALSE);
   }
 
   // TODO: copied from initializeSchema; not certain if we should say/do more

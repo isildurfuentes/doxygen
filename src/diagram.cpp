@@ -15,8 +15,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <qlist.h>
-#include <qarray.h>
 #include "ftextstream.h"
 #include <qfile.h>
 
@@ -1054,7 +1052,7 @@ void ClassDiagram::writeFigure(FTextStream &output,const char *path,
   p->base.computeExtremes(&baseMaxLabelWidth,&baseMaxX);
   p->super.computeExtremes(&superMaxLabelWidth,&superMaxX);
 
-  uint rows=baseRows+superRows-1;
+  uint rows=QMAX(1,baseRows+superRows-1);
   uint cols=(QMAX(baseMaxX,superMaxX)+gridWidth*2-1)/gridWidth;
 
   // Estimate the image aspect width and height in pixels.

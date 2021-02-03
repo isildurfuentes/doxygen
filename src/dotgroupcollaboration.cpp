@@ -14,8 +14,6 @@
 */
 
 #include "dotgroupcollaboration.h"
-
-#include "dotnode.h"
 #include "classlist.h"
 #include "doxygen.h"
 #include "namespacedef.h"
@@ -26,12 +24,10 @@
 DotGroupCollaboration::DotGroupCollaboration(const GroupDef* gd)
 {
   QCString tmp_url = gd->getReference()+"$"+gd->getOutputFileBase();
-  m_usedNodes = new QDict<DotNode>(1009);
   QCString tooltip = gd->briefDescriptionAsTooltip();
   m_rootNode = new DotNode(getNextNodeNumber(), gd->groupTitle(), tooltip, tmp_url, TRUE );
   m_rootNode->markAsVisible();
-  m_usedNodes->insert(gd->name(), m_rootNode );
-  m_edges.setAutoDelete(TRUE);
+  m_usedNodes.insert(std::make_pair(gd->name().str(), m_rootNode));
 
   m_diskName = gd->getOutputFileBase();
 
@@ -40,17 +36,11 @@ DotGroupCollaboration::DotGroupCollaboration(const GroupDef* gd)
 
 DotGroupCollaboration::~DotGroupCollaboration()
 {
-  // delete all created Nodes saved in m_usedNodes:QDict
-  if(m_usedNodes != NULL)
+  // delete all created Nodes saved in m_usedNodes map
+  for (const auto &kv : m_usedNodes)
   {
-    QDictIterator<DotNode> it(*m_usedNodes);
-    for(;it.current(); ++it)
-    {
-      delete it.current();
-    }
+    delete kv.second;
   }
-
-  delete m_usedNodes;
 }
 
 void DotGroupCollaboration::buildGraph(const GroupDef* gd)
@@ -60,46 +50,45 @@ void DotGroupCollaboration::buildGraph(const GroupDef* gd)
   // hierarchy.
 
   // Write parents
-  const GroupList *groups = gd->partOfGroups();
-  if ( groups )
+  for (const auto &d : gd->partOfGroups())
   {
-    GroupListIterator gli(*groups);
-    const GroupDef *d;
-    for (gli.toFirst();(d=gli.current());++gli)
-    {
-      DotNode* nnode = m_usedNodes->find(d->name());
-      if ( !nnode )
-      { // add node
-        tmp_url = d->getReference()+"$"+d->getOutputFileBase();
-        QCString tooltip = d->briefDescriptionAsTooltip();
-        nnode = new DotNode(getNextNodeNumber(), d->groupTitle(), tooltip, tmp_url );
-        nnode->markAsVisible();
-        m_usedNodes->insert(d->name(), nnode );
-      }
-      tmp_url = "";
-      addEdge( nnode, m_rootNode, DotGroupCollaboration::thierarchy, tmp_url, tmp_url );
+    DotNode *nnode = 0;
+    auto it = m_usedNodes.find(d->name().str());
+    if ( it==m_usedNodes.end())
+    { // add node
+      tmp_url = d->getReference()+"$"+d->getOutputFileBase();
+      QCString tooltip = d->briefDescriptionAsTooltip();
+      nnode = new DotNode(getNextNodeNumber(), d->groupTitle(), tooltip, tmp_url );
+      nnode->markAsVisible();
+      m_usedNodes.insert(std::make_pair(d->name().str(), nnode));
     }
+    else
+    {
+      nnode = it->second;
+    }
+    tmp_url = "";
+    addEdge( nnode, m_rootNode, DotGroupCollaboration::thierarchy, tmp_url, tmp_url );
   }
 
   // Add subgroups
-  if ( gd->getSubGroups() && gd->getSubGroups()->count() )
+  for (const auto &def : gd->getSubGroups())
   {
-    QListIterator<GroupDef> defli(*gd->getSubGroups());
-    const GroupDef *def;
-    for (;(def=defli.current());++defli)
-    {
-      DotNode* nnode = m_usedNodes->find(def->name());
-      if ( !nnode )
-      { // add node
-        tmp_url = def->getReference()+"$"+def->getOutputFileBase();
-        QCString tooltip = def->briefDescriptionAsTooltip();
-        nnode = new DotNode(getNextNodeNumber(), def->groupTitle(), tooltip, tmp_url );
-        nnode->markAsVisible();
-        m_usedNodes->insert(def->name(), nnode );
-      }
-      tmp_url = "";
-      addEdge( m_rootNode, nnode, DotGroupCollaboration::thierarchy, tmp_url, tmp_url );
+    DotNode *nnode = 0;
+    auto it = m_usedNodes.find(def->name().str());
+    if ( it==m_usedNodes.end())
+    { // add node
+      tmp_url = def->getReference()+"$"+def->getOutputFileBase();
+      QCString tooltip = def->briefDescriptionAsTooltip();
+      nnode = new DotNode(getNextNodeNumber(), def->groupTitle(), tooltip, tmp_url );
+      nnode->markAsVisible();
+      m_usedNodes.insert(std::make_pair(def->name().str(), nnode));
     }
+    else
+    {
+      nnode = it->second;
+    }
+    tmp_url = "";
+    addEdge( m_rootNode, nnode, DotGroupCollaboration::thierarchy, tmp_url, tmp_url );
   }
 
   //=======================
@@ -120,39 +109,24 @@ void DotGroupCollaboration::buildGraph(const GroupDef* gd)
   }
 
   // Add namespaces
-  if ( gd->getNamespaces() && gd->getNamespaces()->count() )
+  for (const auto &def : gd->getNamespaces())
   {
-    NamespaceSDict::Iterator defli(*gd->getNamespaces());
-    NamespaceDef *def;
-    for (;(def=defli.current());++defli)
-    {
-      tmp_url = def->getReference()+"$"+def->getOutputFileBase()+Doxygen::htmlFileExtension;
-      addCollaborationMember( def, tmp_url, DotGroupCollaboration::tnamespace );
-    }
+    tmp_url = def->getReference()+"$"+def->getOutputFileBase()+Doxygen::htmlFileExtension;
+    addCollaborationMember( def, tmp_url, DotGroupCollaboration::tnamespace );
   }
 
   // Add files
-  if ( gd->getFiles() && gd->getFiles()->count() )
+  for (const auto &def : gd->getFiles())
   {
-    QListIterator<FileDef> defli(*gd->getFiles());
-    const FileDef *def;
-    for (;(def=defli.current());++defli)
-    {
-      tmp_url = def->getReference()+"$"+def->getOutputFileBase()+Doxygen::htmlFileExtension;
-      addCollaborationMember( def, tmp_url, DotGroupCollaboration::tfile );
-    }
+    tmp_url = def->getReference()+"$"+def->getOutputFileBase()+Doxygen::htmlFileExtension;
+    addCollaborationMember( def, tmp_url, DotGroupCollaboration::tfile );
   }
 
   // Add pages
-  if ( gd->getPages() && gd->getPages()->count() )
+  for (const auto &def : gd->getPages())
   {
-    PageSDict::Iterator defli(*gd->getPages());
-    PageDef *def;
-    for (;(def=defli.current());++defli)
-    {
-      tmp_url = def->getReference()+"$"+def->getOutputFileBase()+Doxygen::htmlFileExtension;
-      addCollaborationMember( def, tmp_url, DotGroupCollaboration::tpages );
-    }
+    tmp_url = def->getReference()+"$"+def->getOutputFileBase()+Doxygen::htmlFileExtension;
+    addCollaborationMember( def, tmp_url, DotGroupCollaboration::tpages );
   }
 
   // Add directories
@@ -168,10 +142,8 @@ void DotGroupCollaboration::buildGraph(const GroupDef* gd)
 
 void DotGroupCollaboration::addMemberList( MemberList* ml )
 {
-  if ( !( ml && ml->count()) ) return;
-  MemberListIterator defli(*ml);
-  MemberDef *def;
-  for (;(def=defli.current());++defli)
+  if ( ml==0 || ml->empty() ) return;
+  for (const auto &def : *ml)
   {
     QCString tmp_url = def->getReference()+"$"+def->getOutputFileBase()+Doxygen::htmlFileExtension
       +"#"+def->anchor();
@@ -184,44 +156,34 @@ DotGroupCollaboration::Edge* DotGroupCollaboration::addEdge(
   const QCString& _label, const QCString& _url )
 {
   // search a existing link.
-  QListIterator<Edge> lli(m_edges);
-  Edge* newEdge = 0;
-  for ( lli.toFirst(); (newEdge=lli.current()); ++lli)
+  auto it = std::find_if(m_edges.begin(),m_edges.end(),
+      [&_pNStart,&_pNEnd,&_eType](const auto &edge)
+      { return edge->pNStart==_pNStart && edge->pNEnd==_pNEnd && edge->eType==_eType; });
+
+  if (it==m_edges.end()) // new link
   {
-    if ( newEdge->pNStart==_pNStart &&
-      newEdge->pNEnd==_pNEnd &&
-      newEdge->eType==_eType
-      )
-    { // edge already found
-      break;
-    }
-  }
-  if ( newEdge==0 ) // new link
-  {
-    newEdge = new Edge(_pNStart,_pNEnd,_eType);
-    m_edges.append( newEdge );
+    m_edges.emplace_back(std::make_unique<Edge>(_pNStart,_pNEnd,_eType));
+    it = m_edges.end()-1;
   }
 
-  if (!_label.isEmpty())
+  if (!_label.isEmpty()) // add label
   {
-    newEdge->links.append(new Link(_label,_url));
+    (*it)->links.emplace_back(_label,_url);
   }
 
-  return newEdge;
+  // return found or added edge
+  return (*it).get();
 }
 
 void DotGroupCollaboration::addCollaborationMember(
   const Definition* def, QCString& url, EdgeType eType )
 {
   // Create group nodes
-  if ( !def->partOfGroups() )
-    return;
-  GroupListIterator gli(*def->partOfGroups());
-  GroupDef *d;
   QCString tmp_str;
-  for (;(d=gli.current());++gli)
+  for (const auto &d : def->partOfGroups())
   {
-    DotNode* nnode = m_usedNodes->find(d->name());
+    auto it = m_usedNodes.find(d->name().str());
+    DotNode* nnode = it!=m_usedNodes.end() ? it->second : 0;
     if ( nnode != m_rootNode )
     {
       if ( nnode==0 )
@@ -230,7 +192,7 @@ void DotGroupCollaboration::addCollaborationMember(
         QCString tooltip = d->briefDescriptionAsTooltip();
         nnode = new DotNode(getNextNodeNumber(), d->groupTitle(), tooltip, tmp_str );
         nnode->markAsVisible();
-        m_usedNodes->insert(d->name(), nnode );
+        m_usedNodes.insert(std::make_pair(d->name().str(), nnode));
       }
       tmp_str = def->qualifiedName();
       addEdge( m_rootNode, nnode, eType, tmp_str, url );
@@ -249,23 +211,19 @@ void DotGroupCollaboration::computeTheGraph()
   writeGraphHeader(md5stream,m_rootNode->label());
 
   // clean write flags
-  QDictIterator<DotNode> dni(*m_usedNodes);
-  DotNode *pn;
-  for (dni.toFirst();(pn=dni.current());++dni)
+  for (const auto &kv : m_usedNodes)
   {
-    pn->clearWriteFlag();
+    kv.second->clearWriteFlag();
   }
 
   // write other nodes.
-  for (dni.toFirst();(pn=dni.current());++dni)
+  for (const auto &kv : m_usedNodes)
   {
-    pn->write(md5stream,Inheritance,m_graphFormat,TRUE,FALSE,FALSE);
+    kv.second->write(md5stream,Inheritance,m_graphFormat,TRUE,FALSE,FALSE);
   }
 
   // write edges
-  QListIterator<Edge> eli(m_edges);
-  Edge* edge;
-  for (eli.toFirst();(edge=eli.current());++eli)
+  for (const auto &edge : m_edges)
   {
     edge->write( md5stream );
   }
@@ -306,34 +264,30 @@ void DotGroupCollaboration::Edge::write( FTextStream &t ) const
   t << "Node" << pNEnd->number();
 
   t << " [shape=plaintext";
-  if (links.count()>0) // there are links
+  if (!links.empty()) // there are links
   {
     t << ", ";
     // HTML-like edge labels crash on my Mac with Graphviz 2.0! and
     // are not supported by older version of dot.
     //
     //t << label=<<TABLE BORDER=\"0\" CELLBORDER=\"0\">";
-    //QListIterator<Link> lli(links);
-    //Link *link;
-    //for( lli.toFirst(); (link=lli.current()); ++lli)
+    //for (const auto &link : links)
     //{
     //  t << "<TR><TD";
-    //  if ( !link->url.isEmpty() )
-    //    t << " HREF=\"" << link->url << "\"";
-    //  t << ">" << link->label << "</TD></TR>";
+    //  if ( !link.url.isEmpty() )
+    //    t << " HREF=\"" << link.url << "\"";
+    //  t << ">" << DotNode::convertLabel(link->label) << "</TD></TR>";
     //}
     //t << "</TABLE>>";
 
     t << "label=\"";
-    QListIterator<Link> lli(links);
-    Link *link;
     bool first=TRUE;
     int count=0;
     const int maxLabels = 10;
-    for( lli.toFirst(); (link=lli.current()) && count<maxLabels; ++lli,++count)
+    for (const auto &link : links)
     {
       if (first) first=FALSE; else t << "\\n";
-      t << DotNode::convertLabel(link->label);
+      t << DotNode::convertLabel(link.label);
     }
     if (count==maxLabels) t << "\\n...";
     t << "\"";
@@ -354,7 +308,7 @@ void DotGroupCollaboration::Edge::write( FTextStream &t ) const
 
 bool DotGroupCollaboration::isTrivial() const
 {
-  return m_usedNodes->count() <= 1;
+  return m_usedNodes.size() <= 1;
 }
 
 void DotGroupCollaboration::writeGraphHeader(FTextStream &t,const QCString &title) const

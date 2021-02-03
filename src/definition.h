@@ -19,8 +19,6 @@
 #define DEFINITION_H
 
 #include <vector>
-#include <qlist.h>
-#include <qdict.h>
 
 #include "types.h"
 #include "reflist.h"
@@ -34,7 +32,6 @@
 class FileDef;
 class OutputList;
 class SectionRefs;
-class MemberSDict;
 class MemberDef;
 class GroupDef;
 class GroupList;
@@ -48,7 +45,7 @@ class FTextStream;
 struct DocInfo
 {
     QCString doc;
-    int      line;
+    int      line = -1;
     QCString file;
 };
 
@@ -57,17 +54,17 @@ struct BriefInfo
 {
     QCString doc;
     QCString tooltip;
-    int      line;
+    int      line = -1;
     QCString file;
 };
 
 /** Data associated with description found in the body. */
 struct BodyInfo
 {
-    int      defLine;     //!< line number of the start of the definition
-    int      startLine;   //!< line number of the start of the definition's body
-    int      endLine;     //!< line number of the end of the definition's body
-    FileDef *fileDef;     //!< file definition containing the function body
+    int      defLine = -1;     //!< line number of the start of the definition
+    int      startLine = -1;   //!< line number of the start of the definition's body
+    int      endLine = -1;     //!< line number of the end of the definition's body
+    FileDef *fileDef = 0;      //!< file definition containing the function body
 };
 
 /** The common base class of all entity definitions found in the sources.
@@ -261,7 +258,7 @@ class Definition
     /** Returns the programming language this definition was written in. */
     virtual SrcLangExt getLanguage() const = 0;
 
-    virtual GroupList *partOfGroups() const = 0;
+    virtual const GroupList &partOfGroups() const = 0;
     virtual bool isLinkableViaGroup() const = 0;
 
     virtual const RefItemVector &xrefListItems() const = 0;
@@ -361,7 +358,7 @@ class DefinitionMutable
     // --- actions ----
     //-----------------------------------------------------------------------------------
 
-    virtual void makePartOfGroup(GroupDef *gd) = 0;
+    virtual void makePartOfGroup(const GroupDef *gd) = 0;
 
     /*! Add the list of anchors that mark the sections that are found in the
      * documentation.

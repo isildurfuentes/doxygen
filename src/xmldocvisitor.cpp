@@ -31,17 +31,15 @@
 #include "emoji.h"
 #include "filedef.h"
 
-static void visitCaption(XmlDocVisitor *parent, QList<DocNode> children)
+static void visitCaption(XmlDocVisitor *parent, const DocNodeList &children)
 {
-  QListIterator<DocNode> cli(children);
-  DocNode *n;
-  for (cli.toFirst();(n=cli.current());++cli) n->accept(parent);
+  for (const auto &n : children) n->accept(parent);
 }
 
 static void visitPreStart(FTextStream &t, const char *cmd, bool doCaption,
-                          XmlDocVisitor *parent, QList<DocNode> children,
+                          XmlDocVisitor *parent, const DocNodeList &children,
                           const QCString &name, bool writeType, DocImage::Type type, const QCString &width,
-                          const QCString &height, bool inlineImage = FALSE)
+                          const QCString &height, const QCString &alt = QCString(""), bool inlineImage = FALSE)
 {
   t << "<" << cmd;
   if (writeType)
@@ -68,6 +66,10 @@ static void visitPreStart(FTextStream &t, const char *cmd, bool doCaption,
   {
     t << " height=\"" << convertToXML(height) << "\"";
   }
+  if (!alt.isEmpty())
+  {
+    t << " alt=\"" << convertToXML(alt) << "\"";
+  }
   if (inlineImage)
   {
     t << " inline=\"yes\"";
@@ -86,8 +88,9 @@ static void visitPostEnd(FTextStream &t, const char *cmd)
   t << "</" << cmd << ">" << endl;
 }
 
-XmlDocVisitor::XmlDocVisitor(FTextStream &t,CodeOutputInterface &ci)
-  : DocVisitor(DocVisitor_XML), m_t(t), m_ci(ci), m_insidePre(FALSE), m_hide(FALSE)
+XmlDocVisitor::XmlDocVisitor(FTextStream &t,CodeOutputInterface &ci,const char *langExt)
+  : DocVisitor(DocVisitor_XML), m_t(t), m_ci(ci), m_insidePre(FALSE), m_hide(FALSE),
+    m_langExt(langExt)
 {
 }
 
@@ -457,7 +460,7 @@ void XmlDocVisitor::visit(DocIncOperator *op)
     {
       m_t << "<programlisting filename=\"" << op->includeFileName() << "\">";
     }
-    pushEnabled();
+    pushHidden(m_hide);
     m_hide = TRUE;
   }
   QCString locLangExt = getFileNameExtension(op->includeFileName());
@@ -465,7 +468,7 @@ void XmlDocVisitor::visit(DocIncOperator *op)
   SrcLangExt langExt = getLanguageFromFileName(locLangExt);
   if (op->type()!=DocIncOperator::Skip)
   {
-    popEnabled();
+    m_hide = popHidden();
     if (!m_hide)
     {
       FileDef *fd = 0;
@@ -487,12 +490,12 @@ void XmlDocVisitor::visit(DocIncOperator *op)
                                          );
       if (fd) delete fd;
     }
-    pushEnabled();
+    pushHidden(m_hide);
     m_hide=TRUE;
   }
   if (op->isLast())
   {
-    popEnabled();
+    m_hide = popHidden();
     if (!m_hide) m_t << "</programlisting>";
   }
   else
@@ -773,8 +776,16 @@ void XmlDocVisitor::visitPost(DocHtmlDescData *)
 void XmlDocVisitor::visitPre(DocHtmlTable *t)
 {
   if (m_hide) return;
-  m_t << "<table rows=\"" << t->numRows()
-      << "\" cols=\"" << t->numColumns() << "\">" ;
+  m_t << "<table rows=\"" << (uint)t->numRows()
+      << "\" cols=\"" << (uint)t->numColumns() << "\"" ;
+  for (const auto &opt : t->attribs())
+  {
+    if (opt.name=="width")
+    {
+      m_t << " " << opt.name << "=\"" << opt.value << "\"";
+    }
+  }
+  m_t << ">";
 }
 
 void XmlDocVisitor::visitPost(DocHtmlTable *)
@@ -799,40 +810,47 @@ void XmlDocVisitor::visitPre(DocHtmlCell *c)
 {
   if (m_hide) return;
   if (c->isHeading()) m_t << "<entry thead=\"yes\""; else m_t << "<entry thead=\"no\"";
-  HtmlAttribListIterator li(c->attribs());
-  HtmlAttrib *opt;
-  for (li.toFirst();(opt=li.current());++li)
+  for (const auto &opt : c->attribs())
   {
-    if (opt->name=="colspan" || opt->name=="rowspan")
+    if (opt.name=="colspan" || opt.name=="rowspan")
     {
-      m_t << " " << opt->name << "=\"" << opt->value.toInt() << "\"";
+      m_t << " " << opt.name << "=\"" << opt.value.toInt() << "\"";
     }
-    else if (opt->name=="align" &&
-             (opt->value=="right" || opt->value=="left" || opt->value=="center"))
+    else if (opt.name=="align" &&
+             (opt.value=="right" || opt.value=="left" || opt.value=="center"))
     {
-      m_t << " align=\"" << opt->value << "\"";
+      m_t << " align=\"" << opt.value << "\"";
     }
-    else if (opt->name=="class") // handle markdown generated attributes
+    else if (opt.name=="valign" &&
+      (opt.value == "bottom" || opt.value == "top" || opt.value == "middle"))
     {
-      if (opt->value.left(13)=="markdownTable") // handle markdown generated attributes
+      m_t << " valign=\"" << opt.value << "\"";
+    }
+    else if (opt.name=="width")
+    {
+      m_t << " width=\"" << opt.value << "\"";
+    }
+    else if (opt.name=="class") // handle markdown generated attributes
+    {
+      if (opt.value.left(13)=="markdownTable") // handle markdown generated attributes
       {
-        if (opt->value.right(5)=="Right")
+        if (opt.value.right(5)=="Right")
         {
           m_t << " align='right'";
         }
-        else if (opt->value.right(4)=="Left")
+        else if (opt.value.right(4)=="Left")
         {
           m_t << " align='left'";
         }
-        else if (opt->value.right(6)=="Center")
+        else if (opt.value.right(6)=="Center")
         {
           m_t << " align='center'";
         }
         // skip 'markdownTable*' value ending with "None"
       }
-      else if (!opt->value.isEmpty())
+      else if (!opt.value.isEmpty())
       {
-        m_t << " class=\"" << convertToXML(opt->value) << "\"";
+        m_t << " class=\"" << convertToXML(opt.value) << "\"";
       }
     }
   }
@@ -907,7 +925,13 @@ void XmlDocVisitor::visitPre(DocImage *img)
   {
     baseName = correctURL(url,img->relPath());
   }
-  visitPreStart(m_t, "image", FALSE, this, img->children(), baseName, TRUE, img->type(), img->width(), img->height(), img ->isInlineImage());
+  HtmlAttribList attribs = img->attribs();
+  auto it = std::find_if(attribs.begin(),attribs.end(),
+                         [](const auto &att) { return att.name=="alt"; });
+  QCString altValue = it!=attribs.end() ? it->value : "";
+  visitPreStart(m_t, "image", FALSE, this, img->children(), baseName, TRUE,
+                img->type(), img->width(), img->height(),
+                altValue, img->isInlineImage());
 
   // copy the image to the output dir
   FileDef *fd;
@@ -1068,26 +1092,20 @@ void XmlDocVisitor::visitPre(DocParamList *pl)
   if (m_hide) return;
   m_t << "<parameteritem>" << endl;
   m_t << "<parameternamelist>" << endl;
-  //QStrListIterator li(pl->parameters());
-  //const char *s;
-  QListIterator<DocNode> li(pl->parameters());
-  DocNode *param;
-  for (li.toFirst();(param=li.current());++li)
+  for (const auto &param : pl->parameters())
   {
-    if (pl->paramTypes().count()>0)
+    if (!pl->paramTypes().empty())
     {
-      QListIterator<DocNode> li2(pl->paramTypes());
-      DocNode *type;
       m_t << "<parametertype>";
-      for (li2.toFirst();(type=li2.current());++li2)
+      for (const auto &type : pl->paramTypes())
       {
         if (type->kind()==DocNode::Kind_Word)
         {
-          visit((DocWord*)type);
+          visit((DocWord*)type.get());
         }
         else if (type->kind()==DocNode::Kind_LinkedWord)
         {
-          visit((DocLinkedWord*)type);
+          visit((DocLinkedWord*)type.get());
         }
         else if (type->kind()==DocNode::Kind_Sep)
         {
@@ -1118,11 +1136,11 @@ void XmlDocVisitor::visitPre(DocParamList *pl)
     m_t << ">";
     if (param->kind()==DocNode::Kind_Word)
     {
-      visit((DocWord*)param);
+      visit((DocWord*)param.get());
     }
     else if (param->kind()==DocNode::Kind_LinkedWord)
     {
-      visit((DocLinkedWord*)param);
+      visit((DocLinkedWord*)param.get());
     }
     m_t << "</parametername>" << endl;
   }
@@ -1232,18 +1250,5 @@ void XmlDocVisitor::startLink(const QCString &ref,const QCString &file,const QCS
 void XmlDocVisitor::endLink()
 {
   m_t << "</ref>";
-}
-
-void XmlDocVisitor::pushEnabled()
-{
-  m_enabled.push(new bool(m_hide));
-}
-
-void XmlDocVisitor::popEnabled()
-{
-  bool *v=m_enabled.pop();
-  ASSERT(v!=0);
-  m_hide = *v;
-  delete v;
 }
 

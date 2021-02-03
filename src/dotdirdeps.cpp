@@ -20,6 +20,32 @@
 #include "doxygen.h"
 #include "config.h"
 
+using DirDefMap = std::map<std::string,const DirDef *>;
+
+/**
+ * Puts DOT code for drawing directory to stream and adds it to the list.
+ * @param[in,out] outStream stream to which the DOT code is written to
+ * @param[in] directory will be mapped to a node in DOT code
+ * @param[in] fillBackground if the node shall be explicitly filled
+ * @param[in,out] directoriesInGraph lists the directories which have been written to the output stream
+ */
+static void drawDirectory(FTextStream &outStream, const DirDef *const directory, const bool fillBackground,
+    DirDefMap &directoriesInGraph)
+{
+  outStream << "  " << directory->getOutputFileBase() << " [shape=box "
+      "label=\"" << directory->shortName() << "\" ";
+  if (fillBackground)
+  {
+    outStream << "fillcolor=\"white\" style=\"filled\" ";
+  }
+  if (directory->isCluster())
+  {
+    outStream << "color=\"red\" ";
+  }
+  outStream << "URL=\"" << directory->getOutputFileBase() << Doxygen::htmlFileExtension << "\"];\n";
+  directoriesInGraph.insert(std::make_pair(directory->getOutputFileBase().str(), directory));
+}
+
 void writeDotDirDepGraph(FTextStream &t,const DirDef *dd,bool linkRelations)
 {
   int fontSize = Config_getInt(DOT_FONTSIZE);
@@ -33,53 +59,62 @@ void writeDotDirDepGraph(FTextStream &t,const DirDef *dd,bool linkRelations)
   t << "  node [ fontsize=\"" << fontSize << "\", fontname=\"" << fontName << "\"];\n";
   t << "  edge [ labelfontsize=\"" << fontSize << "\", labelfontname=\"" << fontName << "\"];\n";
 
-  QDict<DirDef> dirsInGraph(257);
+  DirDefMap dirsInGraph;
 
-  dirsInGraph.insert(dd->getOutputFileBase(),dd);
-  if (dd->parent())
+  dirsInGraph.insert(std::make_pair(dd->getOutputFileBase().str(),dd));
+
+  std::vector<const DirDef *> usedDirsNotDrawn;
+  for(const auto& usedDir : dd->usedDirs())
+  {
+    usedDirsNotDrawn.push_back(usedDir->dir());
+  }
+
+  const auto parent = dd->parent();
+  if (parent)
   {
     t << "  subgraph cluster" << dd->parent()->getOutputFileBase() << " {\n";
-    t << "    graph [ bgcolor=\"#ddddee\", pencolor=\"black\", label=\"" 
-      << dd->parent()->shortName() 
+    t << "    graph [ bgcolor=\"#ddddee\", pencolor=\"black\", label=\""
+      << dd->parent()->shortName()
       << "\" fontname=\"" << fontName << "\", fontsize=\"" << fontSize << "\", URL=\"";
     t << dd->parent()->getOutputFileBase() << Doxygen::htmlFileExtension;
     t << "\"]\n";
+
+    {
+      // draw all directories which have `dd->parent()` as parent and `dd` as dependent
+      const auto newEnd = std::remove_if(usedDirsNotDrawn.begin(), usedDirsNotDrawn.end(), [&](const DirDef *const usedDir)
+      {
+        if (dd!=usedDir && dd->parent()==usedDir->parent())
+        {
+          drawDirectory(t, usedDir, usedDir->isCluster() && !Config_getBool(DOT_TRANSPARENT), dirsInGraph);
+          return true;
+        }
+        return false;
+      }
+      );
+      usedDirsNotDrawn.erase(newEnd, usedDirsNotDrawn.end());
+    }
   }
   if (dd->isCluster())
   {
     t << "  subgraph cluster" << dd->getOutputFileBase() << " {\n";
     t << "    graph [ bgcolor=\"#eeeeff\", pencolor=\"black\", label=\"\""
-      << " URL=\"" << dd->getOutputFileBase() << Doxygen::htmlFileExtension 
+      << " URL=\"" << dd->getOutputFileBase() << Doxygen::htmlFileExtension
       << "\"];\n";
-    t << "    " << dd->getOutputFileBase() << " [shape=plaintext label=\"" 
+    t << "    " << dd->getOutputFileBase() << " [shape=plaintext label=\""
       << dd->shortName() << "\"];\n";
 
     // add nodes for sub directories
     for(const auto sdir : dd->subDirs())
     {
-      t << "    " << sdir->getOutputFileBase() << " [shape=box label=\""
-        << sdir->shortName() << "\"";
-      if (sdir->isCluster())
-      {
-        t << " color=\"red\"";
-      }
-      else
-      {
-        t << " color=\"black\"";
-      }
-      t << " fillcolor=\"white\" style=\"filled\"";
-      t << " URL=\"" << sdir->getOutputFileBase()
-        << Doxygen::htmlFileExtension << "\"";
-      t << "];\n";
-      dirsInGraph.insert(sdir->getOutputFileBase(),sdir);
+      drawDirectory(t, sdir, true, dirsInGraph);
     }
     t << "  }\n";
   }
   else
   {
-    t << "  " << dd->getOutputFileBase() << " [shape=box, label=\"" 
+    t << "  " << dd->getOutputFileBase() << " [shape=box, label=\""
       << dd->shortName() << "\", style=\"filled\", fillcolor=\"#eeeeff\","
-      << " pencolor=\"black\", URL=\"" << dd->getOutputFileBase() 
+      << " pencolor=\"black\", URL=\"" << dd->getOutputFileBase()
       << Doxygen::htmlFileExtension << "\"];\n";
   }
   if (dd->parent())
@@ -89,13 +124,10 @@ void writeDotDirDepGraph(FTextStream &t,const DirDef *dd,bool linkRelations)
 
   // add nodes for other used directories
   {
-    QDictIterator<UsedDir> udi(*dd->usedDirs());
-    UsedDir *udir;
     //printf("*** For dir %s\n",shortName().data());
-    for (udi.toFirst();(udir=udi.current());++udi) 
+    for (const auto &usedDir : usedDirsNotDrawn)
       // for each used dir (=directly used or a parent of a directly used dir)
     {
-      const DirDef *usedDir=udir->dir();
       const DirDef *dir=dd;
       while (dir)
       {
@@ -106,23 +138,10 @@ void writeDotDirDepGraph(FTextStream &t,const DirDef *dd,bool linkRelations)
         //    shortName().data(),
         //    !usedDir->isParentOf(this)
         //    );
-        if (dir!=usedDir && dir->parent()==usedDir->parent() && 
-            !usedDir->isParentOf(dd))
+        if (dir!=usedDir && dir->parent()==usedDir->parent())
           // include if both have the same parent (or no parent)
         {
-          t << "  " << usedDir->getOutputFileBase() << " [shape=box label=\"" 
-            << usedDir->shortName() << "\"";
-          if (usedDir->isCluster())
-          {
-            if (!Config_getBool(DOT_TRANSPARENT))
-            {
-              t << " fillcolor=\"white\" style=\"filled\"";
-            }
-            t << " color=\"red\"";
-          }
-          t << " URL=\"" << usedDir->getOutputFileBase() 
-            << Doxygen::htmlFileExtension << "\"];\n";
-          dirsInGraph.insert(usedDir->getOutputFileBase(),usedDir);
+          drawDirectory(t, usedDir, usedDir->isCluster() && !Config_getBool(DOT_TRANSPARENT), dirsInGraph);
           break;
         }
         dir=dir->parent();
@@ -131,32 +150,26 @@ void writeDotDirDepGraph(FTextStream &t,const DirDef *dd,bool linkRelations)
   }
 
   // add relations between all selected directories
-  const DirDef *dir;
-  QDictIterator<DirDef> di(dirsInGraph);
-  for (;(dir=di.current());++di) // foreach dir in the graph
+  for (const auto &kv : dirsInGraph) // foreach dir in the graph
   {
-    QDictIterator<UsedDir> udi(*dir->usedDirs());
-    UsedDir *udir;
-    for (udi.toFirst();(udir=udi.current());++udi) // foreach used dir
+    const DirDef *dir = kv.second;
+    for (const auto &udir : dir->usedDirs())
     {
       const DirDef *usedDir=udir->dir();
       if ((dir!=dd || !udir->inherited()) &&     // only show direct dependencies for this dir
         (usedDir!=dd || !udir->inherited()) && // only show direct dependencies for this dir
         !usedDir->isParentOf(dir) &&             // don't point to own parent
-        dirsInGraph.find(usedDir->getOutputFileBase())) // only point to nodes that are in the graph
+        dirsInGraph.find(usedDir->getOutputFileBase().str())!=dirsInGraph.end()) // only point to nodes that are in the graph
       {
         QCString relationName;
         relationName.sprintf("dir_%06d_%06d",dir->dirCount(),usedDir->dirCount());
-        if (Doxygen::dirRelations.find(relationName)==0)
-        {
-          // new relation
-          Doxygen::dirRelations.append(relationName,
-            new DirRelation(relationName,dir,udir));
-        }
-        int nrefs = udir->filePairs().count();
+        Doxygen::dirRelations.add(relationName,
+            std::make_unique<DirRelation>(
+               relationName,dir,udir.get()));
+        size_t nrefs = udir->filePairs().size();
         t << "  " << dir->getOutputFileBase() << "->"
           << usedDir->getOutputFileBase();
-        t << " [headlabel=\"" << nrefs << "\", labeldistance=1.5";
+        t << " [headlabel=\"" << (uint)nrefs << "\", labeldistance=1.5";
         if (linkRelations)
         {
           t << " headhref=\"" << relationName << Doxygen::htmlFileExtension << "\"";
