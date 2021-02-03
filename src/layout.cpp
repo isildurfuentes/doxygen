@@ -16,6 +16,8 @@
  *
  */
 
+#include <array>
+
 #include <assert.h>
 #include <qfile.h>
 #include <qfileinfo.h>
@@ -29,10 +31,7 @@
 #include "version.h"
 #include "config.h"
 #include "xml.h"
-
-static const char layout_default[] =
-#include "layout_default.xml.h"
-;
+#include "resourcemgr.h"
 
 inline QCString compileOptions(const QCString &def)
 {
@@ -106,9 +105,7 @@ LayoutNavEntry *LayoutNavEntry::find(LayoutNavEntry::Kind kind,
     const char *file) const
 {
   LayoutNavEntry *result=0;
-  QListIterator<LayoutNavEntry> li(m_children);
-  LayoutNavEntry *entry;
-  for (li.toFirst();(entry=li.current());++li)
+  for (const auto &entry : m_children)
   {
     // depth first search, needed to find the entry furthest from the
     // root in case an entry is in the tree twice
@@ -116,7 +113,7 @@ LayoutNavEntry *LayoutNavEntry::find(LayoutNavEntry::Kind kind,
     if (result) return result;
     if (entry->kind()==kind && (file==0 || entry->baseFile()==file))
     {
-      return entry;
+      return entry.get();
     }
   }
   return result;
@@ -1463,7 +1460,7 @@ void LayoutParser::endElement( const std::string &name )
   //printf("endElement [%s]::[%s]\n",m_scope.data(),name.data());
   auto it=g_elementHandlers.end();
 
-  if (!m_scope.isEmpty() && m_scope.right(name.length()+1)==name+"/")
+  if (!m_scope.isEmpty() && m_scope.right(static_cast<uint>(name.length())+1)==name+"/")
   { // element ends current scope
     it = g_elementHandlers.find(m_scope.left(m_scope.length()-1).str());
   }
@@ -1486,17 +1483,12 @@ int LayoutParser::m_userGroupCount=0;
 class LayoutDocManager::Private
 {
   public:
-    QList<LayoutDocEntry> docEntries[LayoutDocManager::NrParts];
+    std::array<LayoutDocEntryList,LayoutDocManager::NrParts> docEntries;
     LayoutNavEntry *rootNav;
 };
 
 LayoutDocManager::LayoutDocManager() : d(std::make_unique<Private>())
 {
-  int i;
-  for (i=0;i<LayoutDocManager::NrParts;i++)
-  {
-    d->docEntries[i].setAutoDelete(TRUE);
-  }
   d->rootNav = new LayoutNavEntry;
 }
 
@@ -1510,6 +1502,7 @@ void LayoutDocManager::init()
   handlers.error        = [&layoutParser](const std::string &fileName,int lineNr,const std::string &msg) { layoutParser.error(fileName,lineNr,msg); };
   XMLParser parser(handlers);
   layoutParser.setDocumentLocator(&parser);
+  QCString layout_default = ResourceMgr::instance().getAsString("layout_default.xml");
   parser.parse("layout_default.xml",layout_default);
 }
 
@@ -1524,7 +1517,7 @@ LayoutDocManager & LayoutDocManager::instance()
   return *theInstance;
 }
 
-const QList<LayoutDocEntry> &LayoutDocManager::docEntries(LayoutDocManager::LayoutPart part) const
+const LayoutDocEntryList &LayoutDocManager::docEntries(LayoutDocManager::LayoutPart part) const
 {
   return d->docEntries[(int)part];
 }
@@ -1536,7 +1529,7 @@ LayoutNavEntry* LayoutDocManager::rootNavEntry() const
 
 void LayoutDocManager::addEntry(LayoutDocManager::LayoutPart p,LayoutDocEntry *e)
 {
-  d->docEntries[(int)p].append(e);
+  d->docEntries[(int)p].push_back(std::unique_ptr<LayoutDocEntry>(e));
 }
 
 void LayoutDocManager::clear(LayoutDocManager::LayoutPart p)
@@ -1568,6 +1561,7 @@ void writeDefaultLayoutFile(const char *fileName)
     return;
   }
   FTextStream t(&f);
+  QCString layout_default = ResourceMgr::instance().getAsString("layout_default.xml");
   t << substitute(layout_default,"$doxygenversion",getDoxygenVersion());
 }
 

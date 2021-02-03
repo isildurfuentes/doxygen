@@ -121,7 +121,7 @@ struct codeYY_state
   FileDef *     sourceFileDef = 0;
   bool          lineNumbers = FALSE;
   const Definition *  currentDefinition = 0;
-  MemberDef *   currentMemberDef = 0;
+  const MemberDef *   currentMemberDef = 0;
   bool          includeCodeFragment = FALSE;
   const char *  currentFontClass = 0;
   bool          searchingForBody = FALSE;
@@ -224,7 +224,7 @@ static bool getLink(yyscan_t yyscanner,const char *className,
                     bool varOnly=FALSE);
 static void generateClassOrGlobalLink(yyscan_t yyscanner,CodeOutputInterface &ol,const char *clName,
                                       bool typeOnly=FALSE,bool varOnly=FALSE);
-static bool generateClassMemberLink(yyscan_t yyscanner,CodeOutputInterface &ol,MemberDef *xmd,const char *memName);
+static bool generateClassMemberLink(yyscan_t yyscanner,CodeOutputInterface &ol,const MemberDef *xmd,const char *memName);
 static bool generateClassMemberLink(yyscan_t yyscanner,CodeOutputInterface &ol,const Definition *def,const char *memName);
 static void generateMemberLink(yyscan_t yyscanner,CodeOutputInterface &ol,const QCString &varName,
             const char *memName);
@@ -537,7 +537,6 @@ NUMBER {INTEGER_NUMBER}|{FLOAT_NUMBER}
                                         }
 <SkipCPP>"//"/[^/!]                     {
                                           REJECT;
-                                          yyextra->code->codify(yytext);
                                         }
 <Body,FuncCall>"{"                      {
                                           yyextra->theVarContext.pushScope();
@@ -2017,20 +2016,15 @@ NUMBER {INTEGER_NUMBER}|{FLOAT_NUMBER}
                                             BEGIN(SkipComment);
                                           }
                                         }
-<*>^{B}*"//"[!/][^\n]*\n                { // remove special one-line comment
-                                          if (Config_getBool(STRIP_CODE_COMMENTS))
-                                          {
-                                            yyextra->yyLineNr++;
-                                            //nextCodeLine(yyscanner);
-                                          }
-                                          else
+<*>^{B}*"//"[!/][^\n]*                  { // remove special one-line comment
+                                          if (!Config_getBool(STRIP_CODE_COMMENTS))
                                           {
                                             startFontClass(yyscanner,"comment");
                                             codifyLines(yyscanner,yytext);
                                             endFontClass(yyscanner);
                                           }
                                         }
-<*>"//"[!/][^\n]*/\n                    { // strip special one-line comment
+<*>"//"[!/][^\n]*                       { // strip special one-line comment
                                           if (YY_START==SkipComment || YY_START==SkipString) REJECT;
                                           if (!Config_getBool(STRIP_CODE_COMMENTS))
                                           {
@@ -2344,7 +2338,7 @@ static void startCodeLine(yyscan_t yyscanner)
     //lineNumber.sprintf("%05d",yyextra->yyLineNr);
     //lineAnchor.sprintf("l%05d",yyextra->yyLineNr);
 
-    Definition *d   = yyextra->sourceFileDef->getSourceDefinition(yyextra->yyLineNr);
+    const Definition *d = yyextra->sourceFileDef->getSourceDefinition(yyextra->yyLineNr);
     //printf("%s:startCodeLine(%d)=%p\n",yyextra->sourceFileDef->name().data(),yyextra->yyLineNr,d);
     if (!yyextra->includeCodeFragment && d)
     {
@@ -2530,7 +2524,7 @@ static void addUsingDirective(yyscan_t yyscanner,const char *name)
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
   if (yyextra->sourceFileDef && name)
   {
-    const NamespaceDef *nd = Doxygen::namespaceSDict->find(name);
+    const NamespaceDef *nd = Doxygen::namespaceLinkedMap->find(name);
     if (nd)
     {
       yyextra->sourceFileDef->addUsingDirective(nd);
@@ -2600,7 +2594,7 @@ static const MemberDef *setCallContextForVar(yyscan_t yyscanner,const QCString &
     const ClassDef *mcd = getClass(scope);
     if (mcd && !locName.isEmpty())
     {
-      MemberDef *md=mcd->getMemberByName(locName);
+      const MemberDef *md=mcd->getMemberByName(locName);
       if (md)
       {
         //printf("name=%s scope=%s\n",locName.data(),scope.data());
@@ -2613,7 +2607,7 @@ static const MemberDef *setCallContextForVar(yyscan_t yyscanner,const QCString &
       const NamespaceDef *mnd = getResolvedNamespace(scope);
       if (mnd && !locName.isEmpty())
       {
-        MemberDef *md=mnd->getMemberByName(locName);
+        const MemberDef *md=mnd->getMemberByName(locName);
         if (md)
         {
           //printf("name=%s scope=%s\n",locName.data(),scope.data());
@@ -2981,7 +2975,7 @@ static void generateClassOrGlobalLink(yyscan_t yyscanner,
 
 static bool generateClassMemberLink(yyscan_t yyscanner,
                                     CodeOutputInterface &ol,
-                                    MemberDef *xmd,
+                                    const MemberDef *xmd,
                                     const char *memName)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
@@ -3050,7 +3044,7 @@ static bool generateClassMemberLink(yyscan_t yyscanner,
   if (def && def->definitionType()==Definition::TypeClass)
   {
     const ClassDef *cd = toClassDef(def);
-    MemberDef *xmd = cd->getMemberByName(memName);
+    const MemberDef *xmd = cd->getMemberByName(memName);
     //printf("generateClassMemberLink(class=%s,member=%s)=%p\n",def->name().data(),memName,xmd);
     if (xmd)
     {

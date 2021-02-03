@@ -20,7 +20,6 @@
 #include <qdir.h>
 #include <qfile.h>
 #include <qtextstream.h>
-#include <qintdict.h>
 #include <qregexp.h>
 #include "docbookgen.h"
 #include "doxygen.h"
@@ -256,13 +255,13 @@ void DocbookCodeGenerator::finish()
 }
 void DocbookCodeGenerator::startCodeFragment(const char *)
 {
-DB_GEN_C
+DB_GEN_C1(m_t)
   m_t << "<programlisting>";
 }
 
 void DocbookCodeGenerator::endCodeFragment(const char *)
 {
-DB_GEN_C
+DB_GEN_C1(m_t)
   //endCodeLine checks is there is still an open code line, if so closes it.
   endCodeLine();
 
@@ -484,18 +483,7 @@ DB_GEN_C2("IndexSections " << is)
     case isModuleDocumentation:
       {
         t << "</title>" << endl;
-        GroupSDict::Iterator gli(*Doxygen::groupSDict);
-        GroupDef *gd;
-        bool found=FALSE;
-        for (gli.toFirst();(gd=gli.current()) && !found;++gli)
-        {
-          if (!gd->isReference())
-          {
-            t << "    <xi:include href=\"" << gd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
-            found=TRUE;
-          }
-        }
-        for (;(gd=gli.current());++gli)
+        for (const auto &gd : *Doxygen::groupLinkedMap)
         {
           if (!gd->isReference())
           {
@@ -508,22 +496,11 @@ DB_GEN_C2("IndexSections " << is)
     case isDirDocumentation:
       {
         t << "</title>" << endl;
-        SDict<DirDef>::Iterator dli(*Doxygen::directories);
-        DirDef *dd;
-        bool found=FALSE;
-        for (dli.toFirst();(dd=dli.current()) && !found;++dli)
+        for (const auto &dd : *Doxygen::dirLinkedMap)
         {
           if (dd->isLinkableInProject())
           {
             t << "<    xi:include href=\"" << dd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
-            found=TRUE;
-          }
-        }
-        for (;(dd=dli.current());++dli)
-        {
-          if (dd->isLinkableInProject())
-          {
-            t << "    <xi:include href=\"" << dd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
           }
         }
       }
@@ -532,24 +509,12 @@ DB_GEN_C2("IndexSections " << is)
     case isNamespaceDocumentation:
       {
         t << "</title>" << endl;
-        NamespaceSDict::Iterator nli(*Doxygen::namespaceSDict);
-        NamespaceDef *nd;
-        bool found=FALSE;
-        for (nli.toFirst();(nd=nli.current()) && !found;++nli)
-        {
-          if (nd->isLinkableInProject() && !nd->isAlias())
-          {
-            t << "<xi:include href=\"" << nd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
-            found=TRUE;
-          }
-        }
-        while ((nd=nli.current()))
+        for (const auto &nd : *Doxygen::namespaceLinkedMap)
         {
           if (nd->isLinkableInProject() && !nd->isAlias())
           {
             t << "<xi:include href=\"" << nd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
           }
-          ++nli;
         }
       }
       t << "</chapter>\n";
@@ -607,13 +572,7 @@ DB_GEN_C2("IndexSections " << is)
     case isExampleDocumentation:
       {
         t << "</title>" << endl;
-        PageSDict::Iterator pdi(*Doxygen::exampleSDict);
-        PageDef *pd=pdi.toFirst();
-        if (pd)
-        {
-          t << "    <xi:include href=\"" << pd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
-        }
-        for (++pdi;(pd=pdi.current());++pdi)
+        for (const auto &pd : *Doxygen::exampleLinkedMap)
         {
           t << "    <xi:include href=\"" << pd->getOutputFileBase() << ".xml\" xmlns:xi=\"http://www.w3.org/2001/XInclude\"/>" << endl;
         }
@@ -632,9 +591,7 @@ DB_GEN_C2("IndexSections " << is)
 void DocbookGenerator::writePageLink(const char *name, bool /*first*/)
 {
 DB_GEN_C
-  PageSDict::Iterator pdi(*Doxygen::pageSDict);
-  PageDef *pd = pdi.toFirst();
-  for (pd = pdi.toFirst();(pd=pdi.current());++pdi)
+  for (const auto &pd : *Doxygen::pageLinkedMap)
   {
     if (!pd->getGroupDef() && !pd->isReference() && pd->name() == stripPath(name))
     {
@@ -653,11 +610,11 @@ DB_GEN_C
   }
 }
 
-void DocbookGenerator::writeDoc(DocNode *n,const Definition *,const MemberDef *,int)
+void DocbookGenerator::writeDoc(DocNode *n,const Definition *ctx,const MemberDef *,int)
 {
 DB_GEN_C
   DocbookDocVisitor *visitor =
-    new DocbookDocVisitor(t,*this);
+    new DocbookDocVisitor(t,*this,ctx?ctx->getDefFileExtension():QCString(""));
   n->accept(visitor);
   delete visitor;
 }

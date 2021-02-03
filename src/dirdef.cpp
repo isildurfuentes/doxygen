@@ -1,6 +1,22 @@
-#include "md5.h"
+/******************************************************************************
+ *
+ * Copyright (C) 1997-2020 by Dimitri van Heesch.
+ *
+ * Permission to use, copy, modify, and distribute this software and its
+ * documentation under the terms of the GNU General Public License is hereby
+ * granted. No representations are made about the suitability of this software
+ * for any purpose. It is provided "as is" without express or implied warranty.
+ * See the GNU General Public License for more details.
+ *
+ * Documents produced by Doxygen are derivative works derived from the
+ * input used in their production; they are not affected by this license.
+ *
+ */
+
+#include <algorithm>
 
 #include "dirdef.h"
+#include "md5.h"
 #include "filename.h"
 #include "doxygen.h"
 #include "util.h"
@@ -15,7 +31,7 @@
 #include "docparser.h"
 #include "definitionimpl.h"
 #include "filedef.h"
-#include <algorithm>
+
 
 //----------------------------------------------------------------------
 
@@ -33,14 +49,14 @@ class DirDefImpl : public DefinitionMixin<DirDef>
     virtual QCString displayName(bool=TRUE) const { return m_dispName; }
     virtual const QCString &shortName() const { return m_shortName; }
     virtual void addSubDir(DirDef *subdir);
-    virtual FileList *   getFiles() const        { return m_fileList; }
-    virtual void addFile(FileDef *fd);
+    virtual const FileList &getFiles() const { return m_fileList; }
+    virtual void addFile(const FileDef *fd);
     virtual const DirList &subDirs() const { return m_subdirs; }
     virtual bool isCluster() const { return m_subdirs.size()>0; }
     virtual int level() const { return m_level; }
     virtual DirDef *parent() const { return m_parent; }
     virtual int dirCount() const { return m_dirCount; }
-    virtual const QDict<UsedDir> *usedDirs() const { return m_usedDirs; }
+    virtual const UsedDirLinkedMap &usedDirs() const { return m_usedDirs; }
     virtual bool isParentOf(const DirDef *dir) const;
     virtual bool depGraphIsTrivial() const;
     virtual QCString shortTitle() const;
@@ -51,8 +67,8 @@ class DirDefImpl : public DefinitionMixin<DirDef>
     virtual void sort();
     virtual void setParent(DirDef *parent);
     virtual void setLevel();
-    virtual void addUsesDependency(DirDef *usedDir,FileDef *srcFd,
-                           FileDef *dstFd,bool inherited);
+    virtual void addUsesDependency(const DirDef *usedDir,const FileDef *srcFd,
+                                   const FileDef *dstFd,bool inherited);
     virtual void computeDependencies();
 
   public:
@@ -75,11 +91,11 @@ class DirDefImpl : public DefinitionMixin<DirDef>
     QCString m_dispName;
     QCString m_shortName;
     QCString m_diskName;
-    FileList *m_fileList;                 // list of files in the group
+    FileList m_fileList;                 // list of files in the group
     int m_dirCount;
     int m_level;
     DirDef *m_parent;
-    QDict<UsedDir> *m_usedDirs;
+    UsedDirLinkedMap m_usedDirs;
 };
 
 DirDef *createDirDef(const char *path)
@@ -116,9 +132,6 @@ DirDefImpl::DirDefImpl(const char *path) : DefinitionMixin(path,1,1,path)
     m_dispName = m_dispName.left(m_dispName.length()-1);
   }
 
-  m_fileList   = new FileList;
-  m_usedDirs   = new QDict<UsedDir>(257);
-  m_usedDirs->setAutoDelete(TRUE);
   m_dirCount   = g_dirCount++;
   m_level=-1;
   m_parent=0;
@@ -126,8 +139,6 @@ DirDefImpl::DirDefImpl(const char *path) : DefinitionMixin(path,1,1,path)
 
 DirDefImpl::~DirDefImpl()
 {
-  delete m_fileList;
-  delete m_usedDirs;
 }
 
 bool DirDefImpl::isLinkableInProject() const
@@ -152,16 +163,16 @@ void DirDefImpl::setParent(DirDef *p)
    m_parent=p;
 }
 
-void DirDefImpl::addFile(FileDef *fd)
+void DirDefImpl::addFile(const FileDef *fd)
 {
-  m_fileList->append(fd);
-  fd->setDirDef(this);
+  m_fileList.push_back(fd);
+  const_cast<FileDef*>(fd)->setDirDef(this);
 }
 
 void DirDefImpl::sort()
 {
   std::sort(m_subdirs.begin(), m_subdirs.end(), compareDirDefs);
-  m_fileList->sort();
+  std::sort(m_fileList.begin(), m_fileList.end(), compareFileDefs);
 }
 
 static QCString encodeDirName(const QCString &anchor)
@@ -313,7 +324,7 @@ void DirDefImpl::writeSubDirList(OutputList &ol)
   int numSubdirs = 0;
   for(const auto dd : m_subdirs)
   {
-    if (dd->hasDocumentation() || dd->getFiles()->count()>0)
+    if (dd->hasDocumentation() || !dd->getFiles().empty())
     {
       numSubdirs++;
     }
@@ -328,7 +339,7 @@ void DirDefImpl::writeSubDirList(OutputList &ol)
     ol.startMemberList();
     for(const auto dd : m_subdirs)
     {
-      if (dd->hasDocumentation() || dd->getFiles()->count()==0)
+      if (dd->hasDocumentation() || dd->getFiles().empty())
       {
         ol.startMemberDeclaration();
         ol.startMemberItem(dd->getOutputFileBase(),0);
@@ -360,9 +371,7 @@ void DirDefImpl::writeSubDirList(OutputList &ol)
 void DirDefImpl::writeFileList(OutputList &ol)
 {
   int numFiles = 0;
-  QListIterator<FileDef> it(*m_fileList);
-  FileDef *fd;
-  for (it.toFirst();(fd=it.current());++it)
+  for (const auto &fd : m_fileList)
   {
     if (fd->hasDocumentation())
     {
@@ -377,7 +386,7 @@ void DirDefImpl::writeFileList(OutputList &ol)
     ol.parseText(theTranslator->trFile(TRUE,FALSE));
     ol.endMemberHeader();
     ol.startMemberList();
-    for (it.toFirst();(fd=it.current());++it)
+    for (const auto &fd : m_fileList)
     {
       if (fd->hasDocumentation())
       {
@@ -455,10 +464,7 @@ void DirDefImpl::writeTagFile(FTextStream &tagFile)
   tagFile << "    <name>" << convertToXML(displayName()) << "</name>" << endl;
   tagFile << "    <path>" << convertToXML(name()) << "</path>" << endl;
   tagFile << "    <filename>" << convertToXML(getOutputFileBase()) << Doxygen::htmlFileExtension << "</filename>" << endl;
-  QListIterator<LayoutDocEntry> eli(
-      LayoutDocManager::instance().docEntries(LayoutDocManager::Directory));
-  LayoutDocEntry *lde;
-  for (eli.toFirst();(lde=eli.current());++eli)
+  for (const auto &lde : LayoutDocManager::instance().docEntries(LayoutDocManager::Directory))
   {
     switch (lde->kind())
     {
@@ -475,14 +481,9 @@ void DirDefImpl::writeTagFile(FTextStream &tagFile)
         break;
       case LayoutDocEntry::DirFiles:
         {
-          if (m_fileList->count()>0)
+          for (const auto &fd : m_fileList)
           {
-            QListIterator<FileDef> it(*m_fileList);
-            FileDef *fd;
-            for (;(fd=it.current());++it)
-            {
               tagFile << "    <file>" << convertToXML(fd->name()) << "</file>" << endl;
-            }
           }
         }
         break;
@@ -523,10 +524,7 @@ void DirDefImpl::writeDocumentation(OutputList &ol)
   //---------------------------------------- start flexible part -------------------------------
 
   SrcLangExt lang = getLanguage();
-  QListIterator<LayoutDocEntry> eli(
-      LayoutDocManager::instance().docEntries(LayoutDocManager::Directory));
-  LayoutDocEntry *lde;
-  for (eli.toFirst();(lde=eli.current());++eli)
+  for (const auto &lde : LayoutDocManager::instance().docEntries(LayoutDocManager::Directory))
   {
     switch (lde->kind())
     {
@@ -550,7 +548,7 @@ void DirDefImpl::writeDocumentation(OutputList &ol)
         break;
       case LayoutDocEntry::DetailedDesc:
         {
-          LayoutDocEntrySection *ls = (LayoutDocEntrySection*)lde;
+          const LayoutDocEntrySection *ls = (const LayoutDocEntrySection*)lde.get();
           writeDetailedDescription(ol,ls->title(lang));
         }
         break;
@@ -628,8 +626,8 @@ void DirDefImpl::setLevel()
 /** Add as "uses" dependency between \a this dir and \a dir,
  *  that was caused by a dependency on file \a fd.
  */
-void DirDefImpl::addUsesDependency(DirDef *dir,FileDef *srcFd,
-                               FileDef *dstFd,bool inherited)
+void DirDefImpl::addUsesDependency(const DirDef *dir,const FileDef *srcFd,
+                                   const FileDef *dstFd,bool inherited)
 {
   if (this==dir) return; // do not add self-dependencies
   //static int count=0;
@@ -641,11 +639,10 @@ void DirDefImpl::addUsesDependency(DirDef *dir,FileDef *srcFd,
 
   // levels match => add direct dependency
   bool added=FALSE;
-  UsedDir *usedDir = m_usedDirs->find(dir->getOutputFileBase());
+  UsedDir *usedDir = m_usedDirs.find(dir->getOutputFileBase());
   if (usedDir) // dir dependency already present
   {
-     FilePair *usedPair = usedDir->findFilePair(
-         srcFd->getOutputFileBase()+dstFd->getOutputFileBase());
+     const FilePair *usedPair = usedDir->findFilePair(FilePair::key(srcFd,dstFd));
      if (usedPair==0) // new file dependency
      {
        //printf("  => new file\n");
@@ -660,9 +657,9 @@ void DirDefImpl::addUsesDependency(DirDef *dir,FileDef *srcFd,
   else // new directory dependency
   {
     //printf("  => new file\n");
-    usedDir = new UsedDir(dir,inherited);
-    usedDir->addFileDep(srcFd,dstFd);
-    m_usedDirs->insert(dir->getOutputFileBase(),usedDir);
+    auto newUsedDir = std::make_unique<UsedDir>(dir,inherited);
+    newUsedDir->addFileDep(srcFd,dstFd);
+    usedDir = m_usedDirs.add(dir->getOutputFileBase(),std::move(newUsedDir));
     added=TRUE;
   }
   if (added)
@@ -684,47 +681,35 @@ void DirDefImpl::addUsesDependency(DirDef *dir,FileDef *srcFd,
  */
 void DirDefImpl::computeDependencies()
 {
-  FileList *fl = m_fileList;
-  if (fl)
+  for (const auto &fd : m_fileList)
   {
-    QListIterator<FileDef> fli(*fl);
-    FileDef *fd;
-    for (fli.toFirst();(fd=fli.current());++fli) // foreach file in dir dd
+    //printf("  File %s\n",fd->name().data());
+    //printf("** dir=%s file=%s\n",shortName().data(),fd->name().data());
+    for (const auto &ii : fd->includeFileList())
     {
-      //printf("  File %s\n",fd->name().data());
-      //printf("** dir=%s file=%s\n",shortName().data(),fd->name().data());
-      QList<IncludeInfo> *ifl = fd->includeFileList();
-      if (ifl)
+      //printf("  > %s\n",ii->includeName.data());
+      //printf("    #include %s\n",ii->includeName.data());
+      if (ii.fileDef && ii.fileDef->isLinkable()) // linkable file
       {
-        QListIterator<IncludeInfo> ifli(*ifl);
-        IncludeInfo *ii;
-        for (ifli.toFirst();(ii=ifli.current());++ifli) // foreach include file
+        DirDef *usedDir = ii.fileDef->getDirDef();
+        if (usedDir)
         {
-          //printf("  > %s\n",ii->includeName.data());
-          //printf("    #include %s\n",ii->includeName.data());
-          if (ii->fileDef && ii->fileDef->isLinkable()) // linkable file
-          {
-            DirDef *usedDir = ii->fileDef->getDirDef();
-            if (usedDir)
-            {
-              // add dependency: thisDir->usedDir
-              //static int count=0;
-              //printf("      %d: add dependency %s->%s\n",count++,name().data(),usedDir->name().data());
-              addUsesDependency(usedDir,fd,ii->fileDef,FALSE);
-            }
-          }
+          // add dependency: thisDir->usedDir
+          //static int count=0;
+          //printf("      %d: add dependency %s->%s\n",count++,name().data(),usedDir->name().data());
+          addUsesDependency(usedDir,fd,ii.fileDef,FALSE);
         }
       }
     }
   }
-  if (m_usedDirs)
+
+  std::sort(m_usedDirs.begin(),m_usedDirs.end(),
+            [](const auto &u1,const auto &u2)
+            { return qstricmp(u1->dir()->getOutputFileBase(),u2->dir()->getOutputFileBase())<0; });
+
+  for (const auto& usedDirectory : m_usedDirs)
   {
-    QDictIterator<UsedDir> udi(*m_usedDirs);
-    UsedDir *udir;
-    for (udi.toFirst();(udir=udi.current());++udi)
-    {
-      udir->sort();
-    }
+    usedDirectory->sort();
   }
 }
 
@@ -740,59 +725,55 @@ bool DirDefImpl::isParentOf(const DirDef *dir) const
 
 bool DirDefImpl::depGraphIsTrivial() const
 {
-  return m_usedDirs->count()==0;
+  return m_usedDirs.empty();
 }
 
-//----------------------------------------------------------------------
-
-int FilePairDict::compareValues(const FilePair *left,const FilePair *right) const
-{
-  int orderHi = qstricmp(left->source()->name(),right->source()->name());
-  if (orderHi!=0) return orderHi;
-  int orderLo = qstricmp(left->destination()->name(),right->destination()->name());
-  return orderLo;
-}
 
 //----------------------------------------------------------------------
 
 UsedDir::UsedDir(const DirDef *dir,bool inherited) :
-   m_dir(dir), m_filePairs(7), m_inherited(inherited)
+   m_dir(dir), m_inherited(inherited)
 {
-  m_filePairs.setAutoDelete(TRUE);
 }
 
 UsedDir::~UsedDir()
 {
 }
 
-
-void UsedDir::addFileDep(FileDef *srcFd,FileDef *dstFd)
+void UsedDir::addFileDep(const FileDef *srcFd,const FileDef *dstFd)
 {
-  m_filePairs.append(srcFd->getOutputFileBase()+dstFd->getOutputFileBase(),
-                     new FilePair(srcFd,dstFd));
+  m_filePairs.add(FilePair::key(srcFd,dstFd),std::make_unique<FilePair>(srcFd,dstFd));
 }
 
 void UsedDir::sort()
 {
-  m_filePairs.sort();
+  std::sort(m_filePairs.begin(),
+            m_filePairs.end(),
+            [](const auto &left,const auto &right)
+            {
+              int orderHi = qstricmp(left->source()->name(),right->source()->name());
+              if (orderHi!=0) return orderHi<0;
+              int orderLo = qstricmp(left->destination()->name(),right->destination()->name());
+              return orderLo<0;
+            });
 }
 
 FilePair *UsedDir::findFilePair(const char *name)
 {
-  QCString n=name;
-  return n.isEmpty() ? 0 : m_filePairs.find(n);
+  return m_filePairs.find(name);
 }
 
 DirDef *DirDefImpl::createNewDir(const char *path)
 {
   ASSERT(path!=0);
-  DirDef *dir = Doxygen::directories->find(path);
+  DirDef *dir = Doxygen::dirLinkedMap->find(path);
   if (dir==0) // new dir
   {
+    dir = Doxygen::dirLinkedMap->add(path,
+            std::unique_ptr<DirDef>(
+              createDirDef(path)));
     //printf("Adding new dir %s\n",path);
-    dir = createDirDef(path);
     //printf("createNewDir %s short=%s\n",path,dir->shortName().data());
-    Doxygen::directories->append(path,dir);
   }
   return dir;
 }
@@ -828,6 +809,13 @@ DirDef *DirDefImpl::mergeDirectoryInTree(const QCString &path)
     p=i+1;
   }
   return dir;
+}
+
+//----------------------------------------------------------------------
+
+QCString FilePair::key(const FileDef *srcFd,const FileDef *dstFd)
+{
+  return srcFd->getOutputFileBase()+";"+dstFd->getOutputFileBase();
 }
 
 //----------------------------------------------------------------------
@@ -895,9 +883,7 @@ void DirRelation::writeDocumentation(OutputList &ol)
   ol.writeString("</th>");
   ol.writeString("</tr>");
 
-  SDict<FilePair>::Iterator fpi(m_dst->filePairs());
-  FilePair *fp;
-  for (fpi.toFirst();(fp=fpi.current());++fpi)
+  for (const auto &fp : m_dst->filePairs())
   {
     ol.writeString("<tr class=\"dirtab\">");
     ol.writeString("<td class=\"dirtab\">");
@@ -926,14 +912,11 @@ void DirRelation::writeDocumentation(OutputList &ol)
 static void computeCommonDirPrefix()
 {
   QCString path;
-  DirDef *dir;
-  DirSDict::Iterator sdi(*Doxygen::directories);
-  if (Doxygen::directories->count()>0) // we have at least one dir
+  auto it = Doxygen::dirLinkedMap->begin();
+  if (!Doxygen::dirLinkedMap->empty()) // we have at least one dir
   {
     // start will full path of first dir
-    sdi.toFirst();
-    dir=sdi.current();
-    path=dir->name();
+    path=(*it)->name();
     int i=path.findRev('/',(int)path.length()-2);
     path=path.left(i+1);
     bool done=FALSE;
@@ -946,8 +929,8 @@ static void computeCommonDirPrefix()
       while (!done)
       {
         uint l = path.length();
-        uint count=0;
-        for (sdi.toFirst();(dir=sdi.current());++sdi)
+        size_t count=0;
+        for (const auto &dir : *Doxygen::dirLinkedMap)
         {
           QCString dirName = dir->name();
           if (dirName.length()>path.length())
@@ -985,7 +968,7 @@ static void computeCommonDirPrefix()
           }
           count++;
         }
-        if (count==Doxygen::directories->count())
+        if (count==Doxygen::dirLinkedMap->size())
           // path matches for all directories -> found the common prefix
         {
           done=TRUE;
@@ -993,7 +976,7 @@ static void computeCommonDirPrefix()
       }
     }
   }
-  for (sdi.toFirst();(dir=sdi.current());++sdi)
+  for (const auto &dir : *Doxygen::dirLinkedMap)
   {
     QCString diskName = dir->name().right(dir->name().length()-path.length());
     dir->setDiskName(diskName);
@@ -1012,7 +995,7 @@ void buildDirectories()
       if (fd->getReference().isEmpty())
       {
         DirDef *dir;
-        if ((dir=Doxygen::directories->find(fd->getPath()))==0) // new directory
+        if ((dir=Doxygen::dirLinkedMap->find(fd->getPath()))==0) // new directory
         {
           dir = DirDefImpl::mergeDirectoryInTree(fd->getPath());
         }
@@ -1025,45 +1008,48 @@ void buildDirectories()
     }
   }
 
-  //DirDef *root = new DirDef("root:");
   // compute relations between directories => introduce container dirs.
-  DirDef *dir;
-  DirSDict::Iterator sdi(*Doxygen::directories);
-  for (sdi.toFirst();(dir=sdi.current());++sdi)
+  for (const auto &dir : *Doxygen::dirLinkedMap)
   {
     QCString name = dir->name();
     int i=name.findRev('/',(int)name.length()-2);
     if (i>0)
     {
-      DirDef *parent = Doxygen::directories->find(name.left(i+1));
+      DirDef *parent = Doxygen::dirLinkedMap->find(name.left(i+1));
       //if (parent==0) parent=root;
       if (parent)
       {
-        parent->addSubDir(dir);
+        parent->addSubDir(dir.get());
         //printf("DirDefImpl::addSubdir(): Adding subdir\n%s to\n%s\n",
         //  dir->displayName().data(), parent->displayName().data());
       }
     }
   }
-  for (sdi.toFirst();(dir=sdi.current());++sdi)
+
+  // sort the directory contents
+  for (const auto &dir : *Doxygen::dirLinkedMap)
   {
     dir->sort();
   }
-  Doxygen::directories->sort();
+
+  // short the directories themselves
+  std::sort(Doxygen::dirLinkedMap->begin(),
+            Doxygen::dirLinkedMap->end(),
+            [](const auto &d1,const auto &d2)
+            { return qstricmp(d1->shortName(),d2->shortName()) < 0; });
+
   computeCommonDirPrefix();
 }
 
 void computeDirDependencies()
 {
-  DirDef *dir;
-  DirSDict::Iterator sdi(*Doxygen::directories);
   // compute nesting level for each directory
-  for (sdi.toFirst();(dir=sdi.current());++sdi)
+  for (const auto &dir : *Doxygen::dirLinkedMap)
   {
     dir->setLevel();
   }
   // compute uses dependencies between directories
-  for (sdi.toFirst();(dir=sdi.current());++sdi)
+  for (const auto &dir : *Doxygen::dirLinkedMap)
   {
     //printf("computeDependencies for %s: #dirs=%d\n",dir->name().data(),Doxygen::directories.count());
     dir->computeDependencies();
@@ -1073,9 +1059,7 @@ void computeDirDependencies()
 
 void generateDirDocs(OutputList &ol)
 {
-  DirDef *dir;
-  DirSDict::Iterator sdi(*Doxygen::directories);
-  for (sdi.toFirst();(dir=sdi.current());++sdi)
+  for (const auto &dir : *Doxygen::dirLinkedMap)
   {
     ol.pushGeneratorState();
     if (!dir->hasDocumentation())
@@ -1087,9 +1071,7 @@ void generateDirDocs(OutputList &ol)
   }
   if (Config_getBool(DIRECTORY_GRAPH))
   {
-    SDict<DirRelation>::Iterator rdi(Doxygen::dirRelations);
-    DirRelation *dr;
-    for (rdi.toFirst();(dr=rdi.current());++rdi)
+    for (const auto &dr : Doxygen::dirRelations)
     {
       dr->writeDocumentation(ol);
     }

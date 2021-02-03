@@ -128,40 +128,40 @@ template<class T> class SharedPtr
 class GenericConstIterator : public TemplateListIntf::ConstIterator
 {
   public:
-    GenericConstIterator(const QList<TemplateVariant> &list)
-      : m_it(list) { }
+    GenericConstIterator(const std::vector<TemplateVariant> &list) : m_list(list) {}
     virtual ~GenericConstIterator() {}
     void toFirst()
     {
-      m_it.toFirst();
+      m_index=0;
     }
     void toLast()
     {
-      m_it.toLast();
+      m_index=m_list.size()-1;
     }
     void toNext()
     {
-      if (m_it.current()) ++m_it;
+      if (m_index<static_cast<int>(m_list.size())) ++m_index;
     }
     void toPrev()
     {
-      if (m_it.current()) --m_it;
+      if (m_index>=0) --m_index;
     }
     bool current(TemplateVariant &v) const
     {
-      if (m_it.current())
+      if (m_index>=0 && m_index<static_cast<int>(m_list.size()))
       {
-        v = *m_it.current();
-        return TRUE;
+        v = m_list[m_index];
+        return true;
       }
       else
       {
         v = TemplateVariant();
-        return FALSE;
+        return false;
       }
     }
   private:
-    QListIterator<TemplateVariant> m_it;
+    const std::vector<TemplateVariant> &m_list;
+    int m_index=0;
 };
 
 //------------------------------------------------------------------------
@@ -172,7 +172,6 @@ class GenericNodeListContext : public TemplateListIntf
   public:
     GenericNodeListContext() : m_refCount(0)
     {
-      m_children.setAutoDelete(TRUE);
     }
     static GenericNodeListContext *alloc()
     {
@@ -182,14 +181,14 @@ class GenericNodeListContext : public TemplateListIntf
     // TemplateListIntf methods
     uint count() const
     {
-      return m_children.count();
+      return static_cast<uint>(m_children.size());
     }
     TemplateVariant at(uint index) const
     {
       TemplateVariant result;
       if (index<count())
       {
-        result = *m_children.at(index);
+        result = m_children[index];
       }
       return result;
     }
@@ -200,11 +199,11 @@ class GenericNodeListContext : public TemplateListIntf
 
     void append(const TemplateVariant &ctn)
     {
-      m_children.append(new TemplateVariant(ctn));
+      m_children.emplace_back(ctn);
     }
     bool isEmpty() const
     {
-      return m_children.isEmpty();
+      return m_children.empty();
     }
     int addRef()
     {
@@ -220,7 +219,7 @@ class GenericNodeListContext : public TemplateListIntf
       return count;
     }
   private:
-    mutable QList<TemplateVariant> m_children;
+    std::vector< TemplateVariant > m_children;
     int m_refCount;
 };
 
@@ -248,21 +247,20 @@ class PropertyMapper
     };
 
   public:
-    PropertyMapper() : m_map(63) { m_map.setAutoDelete(TRUE); }
-
     /** Add a property to the map
      *  @param[in] name   The name of the property to add.
      *  @param[in] handle The method to call when the property is accessed.
      */
     void addProperty(const char *name,typename PropertyFunc::Handler handle)
     {
-      if (m_map.find(name))
+      auto it = m_map.find(name);
+      if (it==m_map.end())
       {
         err("Error: adding property '%s' more than once",name);
       }
       else
       {
-        m_map.insert(name,new PropertyFunc(handle));
+        m_map.insert(std::make_pair(name,std::make_unique<PropertyFunc>(handle)));
       }
     }
 
@@ -276,16 +274,12 @@ class PropertyMapper
     {
       //printf("PropertyMapper::get(%s)\n",name);
       TemplateVariant result;
-      PropertyFuncIntf *func = m_map.find(name);
-      if (func)
-      {
-        result = (*func)(obj);
-      }
-      return result;
+      auto it = m_map.find(name);
+      return it!=m_map.end() ? (*it->second)(obj) : TemplateVariant();
     }
 
   private:
-    QDict<PropertyFuncIntf> m_map;
+    std::unordered_map<std::string,std::unique_ptr<PropertyFuncIntf>> m_map;
 };
 
 
@@ -296,15 +290,15 @@ class PropertyMapper
 class ConfigContext::Private
 {
   public:
-    Private() { m_cachedLists.setAutoDelete(TRUE); }
+    Private() { }
     virtual ~Private() { }
     TemplateVariant fetchList(const QCString &name,const StringVector &list)
     {
-      TemplateVariant *v = m_cachedLists.find(name);
-      if (v==0)
+      auto it = m_cachedLists.find(name.str());
+      if (it==m_cachedLists.end())
       {
         TemplateList *tlist = TemplateList::alloc();
-        m_cachedLists.insert(name,new TemplateVariant(tlist));
+        m_cachedLists.insert(std::make_pair(name.str(),TemplateVariant(tlist)));
         for (const auto &s : list)
         {
           tlist->append(s.c_str());
@@ -313,11 +307,11 @@ class ConfigContext::Private
       }
       else
       {
-        return *v;
+        return it->second;
       }
     }
   private:
-    QDict<TemplateVariant> m_cachedLists;
+    std::unordered_map<std::string,TemplateVariant> m_cachedLists;
 };
 //%% }
 
@@ -1765,18 +1759,16 @@ TemplateVariant IncludeInfoContext::get(const char *n) const
 class IncludeInfoListContext::Private : public GenericNodeListContext
 {
   public:
-    Private(const QList<IncludeInfo> &list,SrcLangExt lang)
+    Private(const IncludeInfoList &list,SrcLangExt lang)
     {
-      QListIterator<IncludeInfo> li(list);
-      IncludeInfo *ii;
-      for (li.toFirst();(ii=li.current());++li)
+      for (const auto &ii : list)
       {
-        append(IncludeInfoContext::alloc(ii,lang));
+        append(IncludeInfoContext::alloc(&ii,lang));
       }
     }
 };
 
-IncludeInfoListContext::IncludeInfoListContext(const QList<IncludeInfo> &list,SrcLangExt lang) : RefCountedContext("IncludeListContext")
+IncludeInfoListContext::IncludeInfoListContext(const IncludeInfoList &list,SrcLangExt lang) : RefCountedContext("IncludeListContext")
 {
   p = new Private(list,lang);
 }
@@ -2132,7 +2124,7 @@ class ClassContext::Private : public DefinitionContext<ClassContext::Private>
     {
       if (!list)
       {
-        MemberList *ml = m_classDef->getMemberList(type);
+        const MemberList *ml = m_classDef->getMemberList(type);
         if (ml)
         {
           list.reset(MemberListInfoContext::alloc(m_classDef,relPathAsString(),ml,title,""));
@@ -2339,7 +2331,7 @@ class ClassContext::Private : public DefinitionContext<ClassContext::Private>
           if (!cd->isAnonymous() &&
               cd->isLinkableInProject() &&
               cd->isEmbeddedInOuterScope() &&
-              cd->partOfGroups()==0
+              cd->partOfGroups().empty()
              )
           {
             classList->append(ClassContext::alloc(cd));
@@ -2376,15 +2368,13 @@ class ClassContext::Private : public DefinitionContext<ClassContext::Private>
     {
       if (m_classDef->hasExamples())
       {
-        ExampleSDict::Iterator it(*m_classDef->exampleList());
-        Example *ex;
-        for (it.toFirst();(ex=it.current());++it)
+        for (const auto &ex : m_classDef->getExamples())
         {
           TemplateStruct *s = TemplateStruct::alloc();
-          s->set("text",ex->name);
+          s->set("text",ex.name);
           s->set("isLinkable",TRUE);
-          s->set("anchor",ex->anchor);
-          s->set("fileName",ex->file);
+          s->set("anchor",ex.anchor);
+          s->set("fileName",ex.file);
           s->set("isReference",FALSE);
           s->set("externalReference","");
           list->append(s);
@@ -2428,17 +2418,15 @@ class ClassContext::Private : public DefinitionContext<ClassContext::Private>
     }
     void addMembers(const ClassDef *cd,MemberListType lt) const
     {
-      MemberList *ml = cd->getMemberList(lt);
+      const MemberList *ml = cd->getMemberList(lt);
       if (ml)
       {
         Cachable &cache = getCache();
-        MemberListIterator li(*ml);
-        const MemberDef *md;
-        for (li.toFirst();(md=li.current());++li)
+        for (const auto &md : *ml)
         {
           if (md->isBriefSectionVisible())
           {
-            cache.allMembers.append(md);
+            cache.allMembers.push_back(md);
           }
         }
       }
@@ -2500,9 +2488,9 @@ class ClassContext::Private : public DefinitionContext<ClassContext::Private>
       Cachable &cache = getCache();
       if (!cache.memberGroups)
       {
-        if (m_classDef->getMemberGroupSDict())
+        if (!m_classDef->getMemberGroups().empty())
         {
-          cache.memberGroups.reset(MemberGroupListContext::alloc(m_classDef,relPathAsString(),m_classDef->getMemberGroupSDict(),m_classDef->subGrouping()));
+          cache.memberGroups.reset(MemberGroupListContext::alloc(m_classDef,relPathAsString(),m_classDef->getMemberGroups(),m_classDef->subGrouping()));
         }
         else
         {
@@ -2765,16 +2753,11 @@ class NamespaceContext::Private : public DefinitionContext<NamespaceContext::Pri
       if (!cache.namespaces)
       {
         TemplateList *namespaceList = TemplateList::alloc();
-        if (m_namespaceDef->getNamespaceSDict())
+        for (const auto &nd : m_namespaceDef->getNamespaces())
         {
-          NamespaceSDict::Iterator sdi(*m_namespaceDef->getNamespaceSDict());
-          const NamespaceDef *nd;
-          for (sdi.toFirst();(nd=sdi.current());++sdi)
+          if (nd->isLinkable() && !nd->isConstantGroup())
           {
-            if (nd->isLinkable() && !nd->isConstantGroup())
-            {
-              namespaceList->append(NamespaceContext::alloc(nd));
-            }
+            namespaceList->append(NamespaceContext::alloc(nd));
           }
         }
         cache.namespaces.reset(namespaceList);
@@ -2787,16 +2770,11 @@ class NamespaceContext::Private : public DefinitionContext<NamespaceContext::Pri
       if (!cache.constantgroups)
       {
         TemplateList *namespaceList = TemplateList::alloc();
-        if (m_namespaceDef->getNamespaceSDict())
+        for (const auto &nd : m_namespaceDef->getNamespaces())
         {
-          NamespaceSDict::Iterator sdi(*m_namespaceDef->getNamespaceSDict());
-          const NamespaceDef *nd;
-          for (sdi.toFirst();(nd=sdi.current());++sdi)
+          if (nd->isLinkable() && nd->isConstantGroup())
           {
-            if (nd->isLinkable() && nd->isConstantGroup())
-            {
-              namespaceList->append(NamespaceContext::alloc(nd));
-            }
+            namespaceList->append(NamespaceContext::alloc(nd));
           }
         }
         cache.constantgroups.reset(namespaceList);
@@ -2808,7 +2786,7 @@ class NamespaceContext::Private : public DefinitionContext<NamespaceContext::Pri
     {
       if (!list)
       {
-        MemberList *ml = m_namespaceDef->getMemberList(type);
+        const MemberList *ml = m_namespaceDef->getMemberList(type);
         if (ml)
         {
           list.reset(MemberListInfoContext::alloc(m_namespaceDef,relPathAsString(),ml,title,""));
@@ -2858,9 +2836,9 @@ class NamespaceContext::Private : public DefinitionContext<NamespaceContext::Pri
       Cachable &cache = getCache();
       if (!cache.memberGroups)
       {
-        if (m_namespaceDef->getMemberGroupSDict())
+        if (!m_namespaceDef->getMemberGroups().empty())
         {
-          cache.memberGroups.reset(MemberGroupListContext::alloc(m_namespaceDef,relPathAsString(),m_namespaceDef->getMemberGroupSDict(),m_namespaceDef->subGrouping()));
+          cache.memberGroups.reset(MemberGroupListContext::alloc(m_namespaceDef,relPathAsString(),m_namespaceDef->getMemberGroups(),m_namespaceDef->subGrouping()));
         }
         else
         {
@@ -2910,7 +2888,7 @@ class NamespaceContext::Private : public DefinitionContext<NamespaceContext::Pri
           if (!cd->isAnonymous() &&
               cd->isLinkableInProject() &&
               cd->isEmbeddedInOuterScope() &&
-              cd->partOfGroups()==0)
+              cd->partOfGroups().empty())
           {
             classList->append(ClassContext::alloc(cd));
           }
@@ -3045,10 +3023,10 @@ class FileContext::Private : public DefinitionContext<FileContext::Private>
     TemplateVariant includeList() const
     {
       Cachable &cache = getCache();
-      if (!cache.includeInfoList && m_fileDef->includeFileList())
+      if (!cache.includeInfoList && !m_fileDef->includeFileList().empty())
       {
         cache.includeInfoList.reset(IncludeInfoListContext::alloc(
-              *m_fileDef->includeFileList(),m_fileDef->getLanguage()));
+              m_fileDef->includeFileList(),m_fileDef->getLanguage()));
       }
       if (cache.includeInfoList)
       {
@@ -3214,16 +3192,11 @@ class FileContext::Private : public DefinitionContext<FileContext::Private>
       if (!cache.namespaces)
       {
         TemplateList *namespaceList = TemplateList::alloc();
-        if (m_fileDef->getNamespaceSDict())
+        for (const auto &nd : m_fileDef->getNamespaces())
         {
-          NamespaceSDict::Iterator sdi(*m_fileDef->getNamespaceSDict());
-          const NamespaceDef *nd;
-          for (sdi.toFirst();(nd=sdi.current());++sdi)
+          if (nd->isLinkable() && !nd->isConstantGroup())
           {
-            if (nd->isLinkable() && !nd->isConstantGroup())
-            {
-              namespaceList->append(NamespaceContext::alloc(nd));
-            }
+            namespaceList->append(NamespaceContext::alloc(nd));
           }
         }
         cache.namespaces.reset(namespaceList);
@@ -3236,16 +3209,11 @@ class FileContext::Private : public DefinitionContext<FileContext::Private>
       if (!cache.constantgroups)
       {
         TemplateList *namespaceList = TemplateList::alloc();
-        if (m_fileDef->getNamespaceSDict())
+        for (const auto &nd : m_fileDef->getNamespaces())
         {
-          NamespaceSDict::Iterator sdi(*m_fileDef->getNamespaceSDict());
-          NamespaceDef *nd;
-          for (sdi.toFirst();(nd=sdi.current());++sdi)
+          if (nd->isLinkable() && nd->isConstantGroup())
           {
-            if (nd->isLinkable() && nd->isConstantGroup())
-            {
-              namespaceList->append(NamespaceContext::alloc(nd));
-            }
+            namespaceList->append(NamespaceContext::alloc(nd));
           }
         }
         cache.constantgroups.reset(namespaceList);
@@ -3257,7 +3225,7 @@ class FileContext::Private : public DefinitionContext<FileContext::Private>
     {
       if (!list)
       {
-        MemberList *ml = m_fileDef->getMemberList(type);
+        const MemberList *ml = m_fileDef->getMemberList(type);
         if (ml)
         {
           list.reset(MemberListInfoContext::alloc(m_fileDef,relPathAsString(),ml,title,""));
@@ -3311,9 +3279,9 @@ class FileContext::Private : public DefinitionContext<FileContext::Private>
       Cachable &cache = getCache();
       if (!cache.memberGroups)
       {
-        if (m_fileDef->getMemberGroupSDict())
+        if (!m_fileDef->getMemberGroups().empty())
         {
-          cache.memberGroups.reset(MemberGroupListContext::alloc(m_fileDef,relPathAsString(),m_fileDef->getMemberGroupSDict(),m_fileDef->subGrouping()));
+          cache.memberGroups.reset(MemberGroupListContext::alloc(m_fileDef,relPathAsString(),m_fileDef->getMemberGroups(),m_fileDef->subGrouping()));
         }
         else
         {
@@ -3364,7 +3332,7 @@ class FileContext::Private : public DefinitionContext<FileContext::Private>
           if (!cd->isAnonymous() &&
               cd->isLinkableInProject() &&
               cd->isEmbeddedInOuterScope() &&
-              cd->partOfGroups()==0)
+              cd->partOfGroups().empty())
           {
             classList->append(ClassContext::alloc(cd));
           }
@@ -3502,16 +3470,10 @@ class DirContext::Private : public DefinitionContext<DirContext::Private>
       if (!cache.files)
       {
         cache.files.reset(TemplateList::alloc());
-        FileList *files = m_dirDef->getFiles();
-        if (files)
+        for (const auto &fd : m_dirDef->getFiles())
         {
-          QListIterator<FileDef> it(*files);
-          const FileDef *fd;
-          for (it.toFirst();(fd=it.current());++it)
-          {
-            FileContext *fc = FileContext::alloc(fd);
-            cache.files->append(fc);
-          }
+          FileContext *fc = FileContext::alloc(fd);
+          cache.files->append(fc);
         }
       }
       return cache.files.get();
@@ -4084,7 +4046,7 @@ class MemberContext::Private : public DefinitionContext<MemberContext::Private>
         s_inst.addProperty("nameWithContextFor",  &Private::nameWithContextFor);
         init=TRUE;
       }
-      if (!md->cookie()) { md->setCookie(new MemberContext::Private::Cachable(md)); }
+      if (md && !md->cookie()) { md->setCookie(new MemberContext::Private::Cachable(md)); }
 
       Cachable &cache = getCache();
       cache.propertyAttrs.reset(TemplateList::alloc());
@@ -4492,15 +4454,7 @@ class MemberContext::Private : public DefinitionContext<MemberContext::Private>
       Cachable &cache = getCache();
       if (!cache.enumValues)
       {
-        const MemberList *ml = m_memberDef->enumFieldList();
-        if (ml)
-        {
-          cache.enumValues.reset(MemberListContext::alloc(ml));
-        }
-        else
-        {
-          cache.enumValues.reset(MemberListContext::alloc());
-        }
+        cache.enumValues.reset(MemberListContext::alloc(&m_memberDef->enumFieldList()));
       }
       return cache.enumValues.get();
     }
@@ -4780,11 +4734,12 @@ class MemberContext::Private : public DefinitionContext<MemberContext::Private>
       Cachable &cache = getCache();
       if (!cache.implements)
       {
-        MemberDef *md = m_memberDef->reimplements();
+        const MemberDef *md = m_memberDef->reimplements();
         cache.implements.reset(TemplateList::alloc());
         if (md)
         {
           const ClassDef *cd = md->getClassDef();
+          // filter on pure virtual/interface methods
           if (cd && (md->virtualness()==Pure || cd->compoundType()==ClassDef::Interface))
           {
             MemberContext *mc = MemberContext::alloc(md);
@@ -4799,11 +4754,12 @@ class MemberContext::Private : public DefinitionContext<MemberContext::Private>
       Cachable &cache = getCache();
       if (!cache.reimplements)
       {
-        MemberDef *md = m_memberDef->reimplements();
+        const MemberDef *md = m_memberDef->reimplements();
         cache.reimplements.reset(TemplateList::alloc());
         if (md)
         {
           const ClassDef *cd = md->getClassDef();
+          // filter on non-pure virtual & non interface methods
           if (cd && md->virtualness()!=Pure && cd->compoundType()!=ClassDef::Interface)
           {
             MemberContext *mc = MemberContext::alloc(md);
@@ -4818,20 +4774,15 @@ class MemberContext::Private : public DefinitionContext<MemberContext::Private>
       Cachable &cache = getCache();
       if (!cache.implementedBy)
       {
-        MemberList *ml = m_memberDef->reimplementedBy();
         cache.implementedBy.reset(TemplateList::alloc());
-        if (ml)
+        for (const auto &md : m_memberDef->reimplementedBy())
         {
-          MemberListIterator mli(*ml);
-          MemberDef *md=0;
-          for (mli.toFirst();(md=mli.current());++mli)
+          const ClassDef *cd = md->getClassDef();
+          // filter on pure virtual/interface methods
+          if (cd && md->virtualness()==Pure && cd->compoundType()==ClassDef::Interface)
           {
-            const ClassDef *cd = md->getClassDef();
-            if (cd && (md->virtualness()==Pure || cd->compoundType()==ClassDef::Interface))
-            {
-              MemberContext *mc = new MemberContext(md);
-              cache.implementedBy->append(mc);
-            }
+            MemberContext *mc = new MemberContext(md);
+            cache.implementedBy->append(mc);
           }
         }
       }
@@ -4843,19 +4794,14 @@ class MemberContext::Private : public DefinitionContext<MemberContext::Private>
       if (!cache.reimplementedBy)
       {
         cache.reimplementedBy.reset(TemplateList::alloc());
-        MemberList *ml = m_memberDef->reimplementedBy();
-        if (ml)
+        for (const auto &md : m_memberDef->reimplementedBy())
         {
-          MemberListIterator mli(*ml);
-          MemberDef *md=0;
-          for (mli.toFirst();(md=mli.current());++mli)
+          const ClassDef *cd = md->getClassDef();
+          // filter on non-pure virtual & non interface methods
+          if (cd && md->virtualness()!=Pure && cd->compoundType()!=ClassDef::Interface)
           {
-            const ClassDef *cd = md->getClassDef();
-            if (cd && md->virtualness()!=Pure && cd->compoundType()!=ClassDef::Interface)
-            {
-              MemberContext *mc = new MemberContext(md);
-              cache.reimplementedBy->append(mc);
-            }
+            MemberContext *mc = new MemberContext(md);
+            cache.reimplementedBy->append(mc);
           }
         }
       }
@@ -4865,15 +4811,13 @@ class MemberContext::Private : public DefinitionContext<MemberContext::Private>
     {
       if (m_memberDef->hasExamples())
       {
-        ExampleSDict::Iterator it(*m_memberDef->getExamples());
-        Example *ex;
-        for (it.toFirst();(ex=it.current());++it)
+        for (const auto &ex : m_memberDef->getExamples())
         {
           TemplateStruct *s = TemplateStruct::alloc();
-          s->set("text",ex->name);
+          s->set("text",ex.name);
           s->set("isLinkable",TRUE);
-          s->set("anchor",ex->anchor);
-          s->set("fileName",ex->file);
+          s->set("anchor",ex.anchor);
+          s->set("fileName",ex.file);
           s->set("isReference",FALSE);
           s->set("externalReference","");
           list->append(s);
@@ -5386,16 +5330,11 @@ class ModuleContext::Private : public DefinitionContext<ModuleContext::Private>
       if (!cache.modules)
       {
         TemplateList *moduleList = TemplateList::alloc();
-        if (m_groupDef->getSubGroups())
+        for (const auto &gd : m_groupDef->getSubGroups())
         {
-          GroupListIterator gli(*m_groupDef->getSubGroups());
-          const GroupDef *gd;
-          for (gli.toFirst();(gd=gli.current());++gli)
+          if (gd->isVisible())
           {
-            if (gd->isVisible())
-            {
-              moduleList->append(ModuleContext::alloc(gd));
-            }
+            moduleList->append(ModuleContext::alloc(gd));
           }
         }
         cache.modules.reset(moduleList);
@@ -5408,14 +5347,9 @@ class ModuleContext::Private : public DefinitionContext<ModuleContext::Private>
       if (!cache.examples)
       {
         TemplateList *exampleList = TemplateList::alloc();
-        if (m_groupDef->getExamples())
+        for (const auto &ex : m_groupDef->getExamples())
         {
-          PageSDict::Iterator eli(*m_groupDef->getExamples());
-          const PageDef *ex;
-          for (eli.toFirst();(ex=eli.current());++eli)
-          {
-            exampleList->append(PageContext::alloc(ex,FALSE,TRUE));
-          }
+          exampleList->append(PageContext::alloc(ex,FALSE,TRUE));
         }
         cache.examples.reset(exampleList);
       }
@@ -5427,14 +5361,9 @@ class ModuleContext::Private : public DefinitionContext<ModuleContext::Private>
       if (!cache.pages)
       {
         TemplateList *pageList = TemplateList::alloc();
-        if (m_groupDef->getExamples())
+        for (const auto &ex : m_groupDef->getPages())
         {
-          PageSDict::Iterator eli(*m_groupDef->getPages());
-          const PageDef *ex;
-          for (eli.toFirst();(ex=eli.current());++eli)
-          {
-            pageList->append(PageContext::alloc(ex,FALSE,TRUE));
-          }
+          pageList->append(PageContext::alloc(ex,FALSE,TRUE));
         }
         cache.pages.reset(pageList);
       }
@@ -5460,14 +5389,9 @@ class ModuleContext::Private : public DefinitionContext<ModuleContext::Private>
       if (!cache.files)
       {
         TemplateList *fileList = TemplateList::alloc();
-        if (m_groupDef->getFiles())
+        for (const auto &fd : m_groupDef->getFiles())
         {
-          QListIterator<FileDef> it(*m_groupDef->getFiles());
-          const FileDef *fd;
-          for (it.toFirst();(fd=it.current());++it)
-          {
-            fileList->append(FileContext::alloc(fd));
-          }
+          fileList->append(FileContext::alloc(fd));
         }
         cache.files.reset(fileList);
       }
@@ -5496,16 +5420,11 @@ class ModuleContext::Private : public DefinitionContext<ModuleContext::Private>
       if (!cache.namespaces)
       {
         TemplateList *namespaceList = TemplateList::alloc();
-        if (m_groupDef->getNamespaces())
+        for (const auto &nd : m_groupDef->getNamespaces())
         {
-          NamespaceSDict::Iterator sdi(*m_groupDef->getNamespaces());
-          const NamespaceDef *nd;
-          for (sdi.toFirst();(nd=sdi.current());++sdi)
+          if (nd->isLinkable() && !nd->isConstantGroup())
           {
-            if (nd->isLinkable() && !nd->isConstantGroup())
-            {
-              namespaceList->append(NamespaceContext::alloc(nd));
-            }
+            namespaceList->append(NamespaceContext::alloc(nd));
           }
         }
         cache.namespaces.reset(namespaceList);
@@ -5518,16 +5437,11 @@ class ModuleContext::Private : public DefinitionContext<ModuleContext::Private>
       if (!cache.constantgroups)
       {
         TemplateList *namespaceList = TemplateList::alloc();
-        if (m_groupDef->getNamespaces())
+        for (const auto &nd : m_groupDef->getNamespaces())
         {
-          NamespaceSDict::Iterator sdi(*m_groupDef->getNamespaces());
-          NamespaceDef *nd;
-          for (sdi.toFirst();(nd=sdi.current());++sdi)
+          if (nd->isLinkable() && nd->isConstantGroup())
           {
-            if (nd->isLinkable() && nd->isConstantGroup())
-            {
-              namespaceList->append(NamespaceContext::alloc(nd));
-            }
+            namespaceList->append(NamespaceContext::alloc(nd));
           }
         }
         cache.constantgroups.reset(namespaceList);
@@ -5618,9 +5532,9 @@ class ModuleContext::Private : public DefinitionContext<ModuleContext::Private>
       Cachable &cache = getCache();
       if (!cache.memberGroups)
       {
-        if (m_groupDef->getMemberGroupSDict())
+        if (!m_groupDef->getMemberGroups().empty())
         {
-          cache.memberGroups.reset(MemberGroupListContext::alloc(m_groupDef,relPathAsString(),m_groupDef->getMemberGroupSDict(),m_groupDef->subGrouping()));
+          cache.memberGroups.reset(MemberGroupListContext::alloc(m_groupDef,relPathAsString(),m_groupDef->getMemberGroups(),m_groupDef->subGrouping()));
         }
         else
         {
@@ -5695,7 +5609,7 @@ class ModuleContext::Private : public DefinitionContext<ModuleContext::Private>
           if (!cd->isAnonymous() &&
               cd->isLinkableInProject() &&
               cd->isEmbeddedInOuterScope() &&
-              cd->partOfGroups()==0)
+              cd->partOfGroups().empty())
           {
             classList->append(ClassContext::alloc(cd));
           }
@@ -6403,9 +6317,9 @@ class NestingNodeContext::Private
     void addNamespaces(bool addClasses,ClassDefSet &visitedClasses)
     {
       const NamespaceDef *nd = toNamespaceDef(m_def);
-      if (nd && nd->getNamespaceSDict())
+      if (nd && !nd->getNamespaces().empty())
       {
-        m_children->addNamespaces(*nd->getNamespaceSDict(),FALSE,addClasses,visitedClasses);
+        m_children->addNamespaces(nd->getNamespaces(),FALSE,addClasses,visitedClasses);
       }
       if (addClasses && nd)
       {
@@ -6418,26 +6332,23 @@ class NestingNodeContext::Private
       if (dd)
       {
         m_children->addDirs(dd->subDirs(),visitedClasses);
-        if (dd && dd->getFiles())
-        {
-          m_children->addFiles(*dd->getFiles(),visitedClasses);
-        }
+        m_children->addFiles(dd->getFiles(),visitedClasses);
       }
     }
     void addPages(ClassDefSet &visitedClasses)
     {
       const PageDef *pd = toPageDef(m_def);
-      if (pd && pd->getSubPages())
+      if (pd && !pd->getSubPages().empty())
       {
-        m_children->addPages(*pd->getSubPages(),FALSE,visitedClasses);
+        m_children->addPages(pd->getSubPages(),FALSE,visitedClasses);
       }
     }
     void addModules(ClassDefSet &visitedClasses)
     {
       const GroupDef *gd = toGroupDef(m_def);
-      if (gd && gd->getSubGroups())
+      if (gd && !gd->getSubGroups().empty())
       {
-        m_children->addModules(*gd->getSubGroups(),visitedClasses);
+        m_children->addModules(gd->getSubGroups(),visitedClasses);
       }
     }
   private:
@@ -6495,24 +6406,33 @@ class NestingContext::Private : public GenericNodeListContext
     Private(const NestingNodeContext *parent,int level)
       : m_parent(parent), m_level(level), m_index(0) {}
 
-    void addNamespaces(const NamespaceSDict &nsDict,bool rootOnly,bool addClasses,ClassDefSet &visitedClasses)
+    void addNamespace(const NamespaceDef *nd,bool rootOnly,bool addClasses,ClassDefSet &visitedClasses)
     {
-      NamespaceSDict::Iterator nli(nsDict);
-      const NamespaceDef *nd;
-      for (nli.toFirst();(nd=nli.current());++nli)
+      if (!nd->isAnonymous() &&
+          (!rootOnly || nd->getOuterScope()==Doxygen::globalScope))
       {
-        if (!nd->isAnonymous() &&
-            (!rootOnly || nd->getOuterScope()==Doxygen::globalScope))
+        bool hasChildren = namespaceHasNestedNamespace(nd);
+        bool isLinkable  = nd->isLinkableInProject();
+        if (isLinkable || hasChildren)
         {
-          bool hasChildren = namespaceHasNestedNamespace(nd);
-          bool isLinkable  = nd->isLinkableInProject();
-          if (isLinkable || hasChildren)
-          {
-            NestingNodeContext *nnc = NestingNodeContext::alloc(m_parent,nd,m_index,m_level,addClasses,FALSE,FALSE,visitedClasses);
-            append(nnc);
-            m_index++;
-          }
+          NestingNodeContext *nnc = NestingNodeContext::alloc(m_parent,nd,m_index,m_level,addClasses,FALSE,FALSE,visitedClasses);
+          append(nnc);
+          m_index++;
         }
+      }
+    }
+    void addNamespaces(const NamespaceLinkedMap &nsLinkedMap,bool rootOnly,bool addClasses,ClassDefSet &visitedClasses)
+    {
+      for (const auto &nd : nsLinkedMap)
+      {
+        addNamespace(nd.get(),rootOnly,addClasses,visitedClasses);
+      }
+    }
+    void addNamespaces(const NamespaceLinkedRefMap &nsLinkedMap,bool rootOnly,bool addClasses,ClassDefSet &visitedClasses)
+    {
+      for (const auto &nd : nsLinkedMap)
+      {
+        addNamespace(nd,rootOnly,addClasses,visitedClasses);
       }
     }
     void addClass(const ClassDef *cd,bool rootOnly,ClassDefSet &visitedClasses)
@@ -6553,15 +6473,13 @@ class NestingContext::Private : public GenericNodeListContext
         addClass(cd.get(),rootOnly,visitedClasses);
       }
     }
-    void addDirs(const DirSDict &dirDict,ClassDefSet &visitedClasses)
+    void addDirs(const DirLinkedMap &dirLinkedMap,ClassDefSet &visitedClasses)
     {
-      SDict<DirDef>::Iterator dli(dirDict);
-      const DirDef *dd;
-      for (dli.toFirst();(dd=dli.current());++dli)
+      for (const auto &dd : dirLinkedMap)
       {
         if (dd->getOuterScope()==Doxygen::globalScope)
         {
-          append(NestingNodeContext::alloc(m_parent,dd,m_index,m_level,FALSE,FALSE,FALSE,visitedClasses));
+          append(NestingNodeContext::alloc(m_parent,dd.get(),m_index,m_level,FALSE,FALSE,FALSE,visitedClasses));
           m_index++;
         }
       }
@@ -6590,50 +6508,53 @@ class NestingContext::Private : public GenericNodeListContext
     }
     void addFiles(const FileList &fList,ClassDefSet &visitedClasses)
     {
-      QListIterator<FileDef> li(fList);
-      const FileDef *fd;
-      for (li.toFirst();(fd=li.current());++li)
+      for (const auto &fd : fList)
       {
         append(NestingNodeContext::alloc(m_parent,fd,m_index,m_level,FALSE,FALSE,FALSE,visitedClasses));
         m_index++;
       }
     }
-    void addPages(const PageSDict &pages,bool rootOnly,ClassDefSet &visitedClasses)
+    void addPage(const PageDef *pd,bool rootOnly,ClassDefSet &visitedClasses)
     {
-      SDict<PageDef>::Iterator pli(pages);
-      const PageDef *pd;
-      for (pli.toFirst();(pd=pli.current());++pli)
+      if (!rootOnly ||
+          pd->getOuterScope()==0 ||
+          pd->getOuterScope()->definitionType()!=Definition::TypePage)
       {
-        if (!rootOnly ||
-            pd->getOuterScope()==0 ||
-            pd->getOuterScope()->definitionType()!=Definition::TypePage)
-        {
-          append(NestingNodeContext::alloc(m_parent,pd,m_index,m_level,FALSE,FALSE,FALSE,visitedClasses));
-          m_index++;
-        }
+        append(NestingNodeContext::alloc(m_parent,pd,m_index,m_level,FALSE,FALSE,FALSE,visitedClasses));
+        m_index++;
       }
     }
-    void addModules(const GroupSDict &groups,ClassDefSet &visitedClasses)
+    void addPages(const PageLinkedMap &pages,bool rootOnly,ClassDefSet &visitedClasses)
     {
-      GroupSDict::Iterator gli(groups);
-      const GroupDef *gd;
-      for (gli.toFirst();(gd=gli.current());++gli)
+      for (const auto &pd : pages)
       {
-        static bool externalGroups = Config_getBool(EXTERNAL_GROUPS);
+        addPage(pd.get(),rootOnly,visitedClasses);
+      }
+    }
+    void addPages(const PageLinkedRefMap &pages,bool rootOnly,ClassDefSet &visitedClasses)
+    {
+      for (const auto &pd : pages)
+      {
+        addPage(pd,rootOnly,visitedClasses);
+      }
+    }
+    void addModules(const GroupLinkedMap &groups,ClassDefSet &visitedClasses)
+    {
+      for (const auto &gd : groups)
+      {
+        bool externalGroups = Config_getBool(EXTERNAL_GROUPS);
         if (!gd->isASubGroup() && gd->isVisible() &&
-             (!gd->isReference() || externalGroups)
+            (!gd->isReference() || externalGroups)
            )
         {
-          append(NestingNodeContext::alloc(m_parent,gd,m_index,m_level,FALSE,FALSE,FALSE,visitedClasses));
+          append(NestingNodeContext::alloc(m_parent,gd.get(),m_index,m_level,FALSE,FALSE,FALSE,visitedClasses));
           m_index++;
         }
       }
     }
-    void addModules(const GroupList &list,ClassDefSet &visitedClasses)
+    void addModules(const GroupList &groups,ClassDefSet &visitedClasses)
     {
-      GroupListIterator gli(list);
-      const GroupDef *gd;
-      for (gli.toFirst();(gd=gli.current());++gli)
+      for (const auto &gd : groups)
       {
         if (gd->isVisible())
         {
@@ -6742,12 +6663,17 @@ void NestingContext::addClasses(const ClassLinkedMap &clLinkedMap,bool rootOnly,
   p->addClasses(clLinkedMap,rootOnly,visitedClasses);
 }
 
-void NestingContext::addNamespaces(const NamespaceSDict &nsDict,bool rootOnly,bool addClasses,ClassDefSet &visitedClasses)
+void NestingContext::addNamespaces(const NamespaceLinkedMap &nsLinkedMap,bool rootOnly,bool addClasses,ClassDefSet &visitedClasses)
 {
-  p->addNamespaces(nsDict,rootOnly,addClasses,visitedClasses);
+  p->addNamespaces(nsLinkedMap,rootOnly,addClasses,visitedClasses);
 }
 
-void NestingContext::addDirs(const DirSDict &dirs,ClassDefSet &visitedClasses)
+void NestingContext::addNamespaces(const NamespaceLinkedRefMap &nsLinkedRefMap,bool rootOnly,bool addClasses,ClassDefSet &visitedClasses)
+{
+  p->addNamespaces(nsLinkedRefMap,rootOnly,addClasses,visitedClasses);
+}
+
+void NestingContext::addDirs(const DirLinkedMap &dirs,ClassDefSet &visitedClasses)
 {
   p->addDirs(dirs,visitedClasses);
 }
@@ -6767,12 +6693,17 @@ void NestingContext::addFiles(const FileList &files,ClassDefSet &visitedClasses)
   p->addFiles(files,visitedClasses);
 }
 
-void NestingContext::addPages(const PageSDict &pages,bool rootOnly,ClassDefSet &visitedClasses)
+void NestingContext::addPages(const PageLinkedMap &pages,bool rootOnly,ClassDefSet &visitedClasses)
 {
   p->addPages(pages,rootOnly,visitedClasses);
 }
 
-void NestingContext::addModules(const GroupSDict &modules,ClassDefSet &visitedClasses)
+void NestingContext::addPages(const PageLinkedRefMap &pages,bool rootOnly,ClassDefSet &visitedClasses)
+{
+  p->addPages(pages,rootOnly,visitedClasses);
+}
+
+void NestingContext::addModules(const GroupLinkedMap &modules,ClassDefSet &visitedClasses)
 {
   p->addModules(modules,visitedClasses);
 }
@@ -6803,14 +6734,8 @@ class ClassTreeContext::Private
     {
       m_classTree.reset(NestingContext::alloc(0,0));
       ClassDefSet visitedClasses;
-      if (Doxygen::namespaceSDict)
-      {
-        m_classTree->addNamespaces(*Doxygen::namespaceSDict,TRUE,TRUE,visitedClasses);
-      }
-      if (Doxygen::classLinkedMap)
-      {
-        m_classTree->addClasses(*Doxygen::classLinkedMap,TRUE,visitedClasses);
-      }
+      m_classTree->addNamespaces(*Doxygen::namespaceLinkedMap,TRUE,TRUE,visitedClasses);
+      m_classTree->addClasses(*Doxygen::classLinkedMap,TRUE,visitedClasses);
       //%% Nesting tree
       static bool init=FALSE;
       if (!init)
@@ -6924,15 +6849,13 @@ TemplateVariant ClassTreeContext::get(const char *name) const
 class NamespaceListContext::Private : public GenericNodeListContext
 {
   public:
-    void addNamespaces(const NamespaceSDict &nsDict)
+    void addNamespaces(const NamespaceLinkedMap &nsLinkedMap)
     {
-      NamespaceSDict::Iterator nli(nsDict);
-      const NamespaceDef *nd;
-      for (nli.toFirst();(nd=nli.current());++nli)
+      for (const auto &nd : nsLinkedMap)
       {
         if (nd->isLinkableInProject())
         {
-          append(NamespaceContext::alloc(nd));
+          append(NamespaceContext::alloc(nd.get()));
         }
       }
     }
@@ -6941,7 +6864,7 @@ class NamespaceListContext::Private : public GenericNodeListContext
 NamespaceListContext::NamespaceListContext() : RefCountedContext("NamespaceListContext")
 {
   p = new Private;
-  p->addNamespaces(*Doxygen::namespaceSDict);
+  p->addNamespaces(*Doxygen::namespaceLinkedMap);
 }
 
 NamespaceListContext::~NamespaceListContext()
@@ -6976,10 +6899,7 @@ class NamespaceTreeContext::Private
     {
       m_namespaceTree.reset(NestingContext::alloc(0,0));
       ClassDefSet visitedClasses;
-      if (Doxygen::namespaceSDict)
-      {
-        m_namespaceTree->addNamespaces(*Doxygen::namespaceSDict,TRUE,FALSE,visitedClasses);
-      }
+      m_namespaceTree->addNamespaces(*Doxygen::namespaceLinkedMap,TRUE,FALSE,visitedClasses);
       //%% Nesting tree
       static bool init=FALSE;
       if (!init)
@@ -7149,11 +7069,9 @@ class DirListContext::Private : public GenericNodeListContext
   public:
     Private()
     {
-      const DirDef *dir;
-      DirSDict::Iterator sdi(*Doxygen::directories);
-      for (sdi.toFirst();(dir=sdi.current());++sdi)
+      for (const auto &dir : *Doxygen::dirLinkedMap)
       {
-        append(DirContext::alloc(dir));
+        append(DirContext::alloc(dir.get()));
       }
     }
 };
@@ -7202,9 +7120,7 @@ UsedFilesContext::UsedFilesContext(const ClassDef *cd) : RefCountedContext("Used
   p = new Private;
   if (cd)
   {
-    QListIterator<FileDef> li(cd->usedFiles());
-    const FileDef *fd;
-    for (li.toFirst();(fd=li.current());++li)
+    for (const auto &fd : cd->usedFiles())
     {
       p->addFile(fd);
     }
@@ -7249,10 +7165,7 @@ class FileTreeContext::Private
       // Add dirs tree
       m_dirFileTree.reset(NestingContext::alloc(0,0));
       ClassDefSet visitedClasses;
-      if (Doxygen::directories)
-      {
-        m_dirFileTree->addDirs(*Doxygen::directories,visitedClasses);
-      }
+      m_dirFileTree->addDirs(*Doxygen::dirLinkedMap,visitedClasses);
       if (Doxygen::inputNameLinkedMap)
       {
         m_dirFileTree->addFiles(*Doxygen::inputNameLinkedMap,visitedClasses);
@@ -7358,15 +7271,12 @@ TemplateVariant FileTreeContext::get(const char *name) const
 class PageTreeContext::Private
 {
   public:
-    Private(const PageSDict *pages)
+    Private(const PageLinkedMap &pages)
     {
       m_pageTree.reset(NestingContext::alloc(0,0));
       ClassDefSet visitedClasses;
       // Add pages
-      if (pages)
-      {
-        m_pageTree->addPages(*pages,TRUE,visitedClasses);
-      }
+      m_pageTree->addPages(pages,TRUE,visitedClasses);
 
       //%% PageNodeList tree:
       static bool init=FALSE;
@@ -7447,7 +7357,7 @@ class PageTreeContext::Private
 
 PropertyMapper<PageTreeContext::Private> PageTreeContext::Private::s_inst;
 
-PageTreeContext::PageTreeContext(const PageSDict *pages) : RefCountedContext("PageTreeContext")
+PageTreeContext::PageTreeContext(const PageLinkedMap &pages) : RefCountedContext("PageTreeContext")
 {
   p = new Private(pages);
 }
@@ -7468,24 +7378,22 @@ TemplateVariant PageTreeContext::get(const char *name) const
 class PageListContext::Private : public GenericNodeListContext
 {
   public:
-    void addPages(const PageSDict &pages)
+    void addPages(const PageLinkedMap &pages)
     {
-      PageSDict::Iterator pdi(pages);
-      const PageDef *pd=0;
-      for (pdi.toFirst();(pd=pdi.current());++pdi)
+      for (const auto &pd : pages)
       {
         if (!pd->getGroupDef() && !pd->isReference())
         {
-          append(PageContext::alloc(pd,FALSE,FALSE));
+          append(PageContext::alloc(pd.get(),FALSE,FALSE));
         }
       }
     }
 };
 
-PageListContext::PageListContext(const PageSDict *pages) : RefCountedContext("PageListContext")
+PageListContext::PageListContext(const PageLinkedMap &pages) : RefCountedContext("PageListContext")
 {
   p = new Private;
-  if (pages) p->addPages(*pages);
+  p->addPages(pages);
 }
 
 PageListContext::~PageListContext()
@@ -7517,16 +7425,11 @@ class ExampleListContext::Private : public GenericNodeListContext
   public:
     Private()
     {
-      if (Doxygen::exampleSDict)
+      for (const auto &pd : *Doxygen::exampleLinkedMap)
       {
-        PageSDict::Iterator pdi(*Doxygen::exampleSDict);
-        const PageDef *pd=0;
-        for (pdi.toFirst();(pd=pdi.current());++pdi)
+        if (!pd->getGroupDef() && !pd->isReference())
         {
-          if (!pd->getGroupDef() && !pd->isReference())
-          {
-            append(PageContext::alloc(pd,FALSE,TRUE));
-          }
+          append(PageContext::alloc(pd.get(),FALSE,TRUE));
         }
       }
     }
@@ -7566,13 +7469,11 @@ class ModuleListContext::Private : public GenericNodeListContext
   public:
     void addModules()
     {
-      GroupSDict::Iterator gli(*Doxygen::groupSDict);
-      const GroupDef *gd;
-      for (gli.toFirst();(gd=gli.current());++gli)
+      for (const auto &gd : *Doxygen::groupLinkedMap)
       {
         if (!gd->isReference())
         {
-          append(ModuleContext::alloc(gd));
+          append(ModuleContext::alloc(gd.get()));
         }
       }
     }
@@ -7617,10 +7518,7 @@ class ModuleTreeContext::Private
       m_moduleTree.reset(NestingContext::alloc(0,0));
       ClassDefSet visitedClasses;
       // Add modules
-      if (Doxygen::groupSDict)
-      {
-        m_moduleTree->addModules(*Doxygen::groupSDict,visitedClasses);
-      }
+      m_moduleTree->addModules(*Doxygen::groupLinkedMap,visitedClasses);
 
       //%% ModuleList tree:
       static bool init=FALSE;
@@ -7823,10 +7721,7 @@ class ExampleTreeContext::Private
       m_exampleTree.reset(NestingContext::alloc(0,0));
       ClassDefSet visitedClasses;
       // Add pages
-      if (Doxygen::exampleSDict)
-      {
-        m_exampleTree->addPages(*Doxygen::exampleSDict,TRUE,visitedClasses);
-      }
+      m_exampleTree->addPages(*Doxygen::exampleLinkedMap,TRUE,visitedClasses);
 
       static bool init=FALSE;
       if (!init)
@@ -8579,9 +8474,7 @@ MemberListContext::MemberListContext(const MemberList *list) : RefCountedContext
   if (list)
   {
     bool details = list->listType()&MemberListType_detailedLists;
-    MemberListIterator mli(*list);
-    MemberDef *md;
-    for (mli.toFirst();(md=mli.current());++mli)
+    for (const auto &md : *list)
     {
       if ((md->isBriefSectionVisible() && !details) ||
           (md->isDetailedSectionLinkable() && details)
@@ -8589,24 +8482,6 @@ MemberListContext::MemberListContext(const MemberList *list) : RefCountedContext
       {
         p->addMember(md);
       }
-    }
-  }
-}
-
-MemberListContext::MemberListContext(MemberSDict *list,bool doSort) : RefCountedContext("MemberListContext")
-{
-  p = new Private;
-  if (list)
-  {
-    if (doSort)
-    {
-      list->sort();
-    }
-    MemberSDict::Iterator it(*list);
-    MemberDef *md;
-    for (it.toFirst();(md=it.current());++it)
-    {
-      p->addMember(md);
     }
   }
 }
@@ -8825,7 +8700,7 @@ class MemberGroupInfoContext::Private
     {
       if (!m_cache.memberListContext)
       {
-        m_cache.memberListContext.reset(MemberListContext::alloc(m_memberGroup->members()));
+        m_cache.memberListContext.reset(MemberListContext::alloc(&m_memberGroup->members()));
       }
       return m_cache.memberListContext.get();
     }
@@ -8845,7 +8720,7 @@ class MemberGroupInfoContext::Private
     {
       if (!m_cache.memberGroups)
       {
-        m_cache.memberGroups.reset(MemberGroupListContext::alloc(m_def,m_relPath,0));
+        m_cache.memberGroups.reset(MemberGroupListContext::alloc());
       }
       return m_cache.memberGroups.get();
     }
@@ -8922,33 +8797,23 @@ MemberGroupListContext::MemberGroupListContext() : RefCountedContext("MemberGrou
   p = new Private;
 }
 
-MemberGroupListContext::MemberGroupListContext(const Definition *def,const QCString &relPath,const MemberGroupList *list) : RefCountedContext("MemberGroupListContext")
+MemberGroupListContext::MemberGroupListContext(const Definition *def,const QCString &relPath,const MemberGroupRefList &list) : RefCountedContext("MemberGroupListContext")
 {
   p = new Private;
-  if (list)
+  for (const auto &mg : list)
   {
-    MemberGroupListIterator mgli(*list);
-    MemberGroup *mg;
-    for (;(mg=mgli.current());++mgli)
-    {
-      p->addMemberGroup(def,relPath,mg);
-    }
+    p->addMemberGroup(def,relPath,mg);
   }
 }
 
-MemberGroupListContext::MemberGroupListContext(const Definition *def,const QCString &relPath,const MemberGroupSDict *dict,bool subGrouping) : RefCountedContext("MemberGroupListContext")
+MemberGroupListContext::MemberGroupListContext(const Definition *def,const QCString &relPath,const MemberGroupList &list,bool subGrouping) : RefCountedContext("MemberGroupListContext")
 {
   p = new Private;
-  if (dict)
+  for (const auto &mg : list)
   {
-    MemberGroupSDict::Iterator di(*dict);
-    const MemberGroup *mg;
-    for (di.toFirst();(mg=di.current());++di)
+    if (!mg->allMembersInSameSection() || !subGrouping)
     {
-      if (!mg->allMembersInSameSection() || !subGrouping)
-      {
-        p->addMemberGroup(def,relPath,mg);
-      }
+      p->addMemberGroup(def,relPath,mg.get());
     }
   }
 }
@@ -9094,7 +8959,7 @@ TemplateVariant MemberListInfoContext::get(const char *name) const
 class InheritedMemberInfoContext::Private
 {
   public:
-    Private(const ClassDef *cd,MemberList *ml,const QCString &title)
+    Private(const ClassDef *cd,const MemberList *ml,const QCString &title)
       : m_class(cd), m_memberList(ml), m_title(title)
     {
       static bool init=FALSE;
@@ -9154,7 +9019,7 @@ class InheritedMemberInfoContext::Private
 
   private:
     const ClassDef *  m_class;
-    MemberList *m_memberList;
+    const MemberList *m_memberList;
     QCString    m_title;
     mutable SharedPtr<ClassContext> m_classCtx;
     mutable SharedPtr<MemberListContext> m_memberListCtx;
@@ -9165,7 +9030,7 @@ class InheritedMemberInfoContext::Private
 
 PropertyMapper<InheritedMemberInfoContext::Private> InheritedMemberInfoContext::Private::s_inst;
 
-InheritedMemberInfoContext::InheritedMemberInfoContext(const ClassDef *cd,MemberList *ml,
+InheritedMemberInfoContext::InheritedMemberInfoContext(const ClassDef *cd,const MemberList *ml,
                                                        const QCString &title) : RefCountedContext("InheritedMemberInfoContext")
 {
   p = new Private(cd,ml,title);
@@ -9187,58 +9052,43 @@ TemplateVariant InheritedMemberInfoContext::get(const char *name) const
 class InheritedMemberInfoListContext::Private : public GenericNodeListContext
 {
   public:
-    void addMemberList(const ClassDef *inheritedFrom,MemberList *ml,MemberList *combinedList)
+    void addMemberList(const ClassDef *inheritedFrom,const MemberList &ml,MemberList *combinedList)
     {
-      if (ml)
+      for (const auto &md : ml)
       {
-        MemberListIterator li(*ml);
-        MemberDef *md;
-        for (li.toFirst();(md=li.current());++li)
+        if (md->isBriefSectionVisible() && !md->isReimplementedBy(inheritedFrom))
         {
-          if (md->isBriefSectionVisible() && !md->isReimplementedBy(inheritedFrom))
-          {
-            combinedList->append(md);
-          }
+          combinedList->push_back(md);
         }
       }
     }
-    void addMemberListIncludingGrouped(const ClassDef *inheritedFrom,MemberList *ml,MemberList *combinedList)
+    void addMemberListIncludingGrouped(const ClassDef *inheritedFrom,const MemberList *ml,MemberList *combinedList)
     {
       if (ml)
       {
-        addMemberList(inheritedFrom,ml,combinedList);
-        if (ml->getMemberGroupList())
+        addMemberList(inheritedFrom,*ml,combinedList);
+        for (const auto *mg : ml->getMemberGroupList())
         {
-          MemberGroupListIterator mgli(*ml->getMemberGroupList());
-          MemberGroup *mg;
-          for (mgli.toFirst();(mg=mgli.current());++mgli)
-          {
-            addMemberList(inheritedFrom,mg->members(),combinedList);
-          }
+          addMemberList(inheritedFrom,mg->members(),combinedList);
         }
       }
     }
     void addMemberGroupsOfClass(const ClassDef *inheritedFrom,
                                 const ClassDef *cd,MemberListType lt,MemberList *combinedList)
     {
-      if (cd->getMemberGroupSDict())
+      // TODO: why this there no addMemberGroupsOfNamespace, addMembersGroupsOfFile,
+      // addMemberGroupsOfGroup?
+      for (const auto &mg: cd->getMemberGroups())
       {
-        MemberGroupSDict::Iterator mgli(*cd->getMemberGroupSDict());
-        MemberGroup *mg;
-        for (;(mg=mgli.current());++mgli)
+        if (!mg->members().empty() && (!mg->allMembersInSameSection() || !cd->subGrouping())) // group is in its own section
         {
-          if (mg->members() && (!mg->allMembersInSameSection() || !cd->subGrouping())) // group is in its own section
+          for (const auto &md : mg->members())
           {
-            MemberListIterator li(*mg->members());
-            MemberDef *md;
-            for (li.toFirst();(md=li.current());++li)
+            if (lt==md->getSectionList(mg->container())->listType() &&
+                !md->isReimplementedBy(inheritedFrom) &&
+                md->isBriefSectionVisible())
             {
-              if (lt==md->getSectionList(mg->container())->listType() &&
-                  !md->isReimplementedBy(inheritedFrom) &&
-                  md->isBriefSectionVisible())
-              {
-                combinedList->append(md);
-              }
+              combinedList->push_back(md);
             }
           }
         }
@@ -9251,8 +9101,8 @@ class InheritedMemberInfoListContext::Private : public GenericNodeListContext
       if (lt2!=-1) count += cd->countMembersIncludingGrouped((MemberListType)lt2,inheritedFrom,additionalList);
       if (count>0)
       {
-        MemberList *ml  = cd->getMemberList(lt1);
-        MemberList *ml2 = lt2!=-1 ? cd->getMemberList((MemberListType)lt2) : 0;
+        const MemberList *ml  = cd->getMemberList(lt1);
+        const MemberList *ml2 = lt2!=-1 ? cd->getMemberList((MemberListType)lt2) : 0;
         MemberList *combinedList = new MemberList(lt);
         addMemberListIncludingGrouped(inheritedFrom,ml,combinedList);
         addMemberListIncludingGrouped(inheritedFrom,ml2,combinedList);
@@ -9263,7 +9113,7 @@ class InheritedMemberInfoListContext::Private : public GenericNodeListContext
     }
     void findInheritedMembers(const ClassDef *inheritedFrom,const ClassDef *cd,MemberListType lt,
                               int lt2, const QCString &title,bool additionalList,
-                              QPtrDict<void> *visitedClasses)
+                              ClassDefSet &visitedClasses)
     {
       for (const auto &ibcd : cd->baseClasses())
       {
@@ -9276,9 +9126,9 @@ class InheritedMemberInfoListContext::Private : public GenericNodeListContext
           {
             lt2=lt3;
           }
-          if (visitedClasses->find(icd)==0)
+          if (visitedClasses.find(icd)==visitedClasses.end())
           {
-            visitedClasses->insert(icd,icd); // guard for multiple virtual inheritance
+            visitedClasses.insert(icd); // guard for multiple virtual inheritance
             if (lt1!=-1)
             {
               // add member info for members of cd with list type lt
@@ -9300,14 +9150,14 @@ InheritedMemberInfoListContext::InheritedMemberInfoListContext() : RefCountedCon
 void InheritedMemberInfoListContext::addMemberList(
     const ClassDef *cd,MemberListType lt,const QCString &title,bool additionalList)
 {
-  QPtrDict<void> visited(17);
+  ClassDefSet visited;
   bool memberInSection = cd->countMembersIncludingGrouped(lt,cd,FALSE)>0;
   bool show = (additionalList && !memberInSection) || // inherited member to show in the additional inherited members list
               (!additionalList && memberInSection);   // inherited member to show in a member list of the class
   //printf("%s:%s show=%d\n",cd->name().data(),MemberList::listTypeAsString(lt).data(),show);
   if (show)
   {
-    p->findInheritedMembers(cd,cd,lt,-1,title,additionalList,&visited);
+    p->findInheritedMembers(cd,cd,lt,-1,title,additionalList,visited);
   }
 }
 
@@ -9637,25 +9487,26 @@ TemplateVariant SymbolContext::get(const char *name) const
 class SymbolListContext::Private : public GenericNodeListContext
 {
   public:
-    Private(const SearchDefinitionList *sdl)
+    Private(const SearchIndexList::const_iterator &start,
+            const SearchIndexList::const_iterator &end)
     {
-      QListIterator<Definition> li(*sdl);
-      const Definition *def;
       const Definition *prev = 0;
-      for (li.toFirst();(def=li.current());)
+      for (auto it = start; it!=end;)
       {
-        ++li;
-        const Definition *next = li.current();
+        const Definition *def = *it;
+        ++it;
+        const Definition *next = it!=end ? *it : 0;
         append(SymbolContext::alloc(def,prev,next));
         prev = def;
       }
     }
 };
 
-SymbolListContext::SymbolListContext(const SearchDefinitionList *sdl)
+SymbolListContext::SymbolListContext(const SearchIndexList::const_iterator &start,
+                                     const SearchIndexList::const_iterator &end)
     : RefCountedContext("SymbolListContext")
 {
-  p = new Private(sdl);
+  p = new Private(start,end);
 }
 
 SymbolListContext::~SymbolListContext()
@@ -9686,7 +9537,8 @@ TemplateListIntf::ConstIterator *SymbolListContext::createIterator() const
 class SymbolGroupContext::Private
 {
   public:
-    Private(const SearchDefinitionList *sdl) : m_sdl(sdl)
+    Private(const SearchIndexList::const_iterator &start,
+            const SearchIndexList::const_iterator &end) : m_start(start), m_end(end)
     {
       static bool init=FALSE;
       if (!init)
@@ -9703,22 +9555,23 @@ class SymbolGroupContext::Private
     }
     TemplateVariant id() const
     {
-      return m_sdl->id();
+      return searchId(*m_start);
     }
     TemplateVariant name() const
     {
-      return m_sdl->name();
+      return searchName(*m_start);
     }
     TemplateVariant symbolList() const
     {
       if (!m_cache.symbolList)
       {
-        m_cache.symbolList.reset(SymbolListContext::alloc(m_sdl));
+        m_cache.symbolList.reset(SymbolListContext::alloc(m_start,m_end));
       }
       return m_cache.symbolList.get();
     }
   private:
-    const SearchDefinitionList *m_sdl;
+    SearchIndexList::const_iterator m_start;
+    SearchIndexList::const_iterator m_end;
     struct Cachable
     {
       SharedPtr<SymbolListContext> symbolList;
@@ -9730,10 +9583,11 @@ class SymbolGroupContext::Private
 
 PropertyMapper<SymbolGroupContext::Private> SymbolGroupContext::Private::s_inst;
 
-SymbolGroupContext::SymbolGroupContext(const SearchDefinitionList *sdl)
+SymbolGroupContext::SymbolGroupContext(const SearchIndexList::const_iterator &start,
+                                       const SearchIndexList::const_iterator &end)
     : RefCountedContext("SymbolGroupContext")
 {
-  p = new Private(sdl);
+  p = new Private(start,end);
 }
 
 SymbolGroupContext::~SymbolGroupContext()
@@ -9752,18 +9606,30 @@ TemplateVariant SymbolGroupContext::get(const char *name) const
 class SymbolGroupListContext::Private : public GenericNodeListContext
 {
   public:
-    Private(const SearchIndexList *sil)
+    Private(const SearchIndexList &sil)
     {
-      SDict<SearchDefinitionList>::Iterator li(*sil);
-      SearchDefinitionList *dl;
-      for (li.toFirst();(dl=li.current());++li)
+      QCString lastName;
+      auto it = sil.begin();
+      auto it_begin = it;
+      while (it!=sil.end())
       {
-        append(SymbolGroupContext::alloc(dl));
+        QCString name = searchName(*it);
+        if (name!=lastName)
+        {
+          append(SymbolGroupContext::alloc(it_begin,it));
+          it_begin = it;
+          lastName = name;
+        }
+        ++it;
+      }
+      if (it_begin!=sil.end())
+      {
+        append(SymbolGroupContext::alloc(it_begin,sil.end()));
       }
     }
 };
 
-SymbolGroupListContext::SymbolGroupListContext(const SearchIndexList *sil)
+SymbolGroupListContext::SymbolGroupListContext(const SearchIndexList &sil)
     : RefCountedContext("SymbolGroupListContext")
 {
   p = new Private(sil);
@@ -9797,7 +9663,9 @@ TemplateListIntf::ConstIterator *SymbolGroupListContext::createIterator() const
 class SymbolIndexContext::Private
 {
   public:
-    Private(const SearchIndexList *sl,const QCString &name) : m_searchList(sl), m_name(name)
+    Private(const std::string &letter,
+            const SearchIndexList &sl,
+            const QCString &name) : m_letter(letter), m_searchList(sl), m_name(name)
     {
       static bool init=FALSE;
       if (!init)
@@ -9818,7 +9686,7 @@ class SymbolIndexContext::Private
     }
     TemplateVariant letter() const
     {
-      return QString(QChar(m_searchList->letter())).utf8();
+      return m_letter;
     }
     TemplateVariant symbolGroups() const
     {
@@ -9829,7 +9697,8 @@ class SymbolIndexContext::Private
       return m_cache.symbolGroups.get();
     }
   private:
-    const SearchIndexList *m_searchList;
+    QCString m_letter;
+    const SearchIndexList &m_searchList;
     QCString m_name;
     struct Cachable
     {
@@ -9842,10 +9711,10 @@ class SymbolIndexContext::Private
 
 PropertyMapper<SymbolIndexContext::Private> SymbolIndexContext::Private::s_inst;
 
-SymbolIndexContext::SymbolIndexContext(const SearchIndexList *sl,const QCString &name)
+SymbolIndexContext::SymbolIndexContext(const std::string &letter,const SearchIndexList &sl,const QCString &name)
     : RefCountedContext("SymbolIndexContext")
 {
-  p = new Private(sl,name);
+  p = new Private(letter,sl,name);
 }
 
 SymbolIndexContext::~SymbolIndexContext()
@@ -9864,19 +9733,17 @@ TemplateVariant SymbolIndexContext::get(const char *name) const
 class SymbolIndicesContext::Private : public GenericNodeListContext
 {
   public:
-    Private(const SearchIndexInfo *info)
+    Private(const SearchIndexInfo &info)
     {
       // use info->symbolList to populate the list
-      SIntDict<SearchIndexList>::Iterator it(info->symbolList);
-      const SearchIndexList *sl;
-      for (it.toFirst();(sl=it.current());++it) // for each letter
+      for (const auto &kv : info.symbolMap)
       {
-        append(SymbolIndexContext::alloc(sl,info->name));
+        append(SymbolIndexContext::alloc(kv.first,kv.second,info.name));
       }
     }
 };
 
-SymbolIndicesContext::SymbolIndicesContext(const SearchIndexInfo *info) : RefCountedContext("SymbolIndicesContext")
+SymbolIndicesContext::SymbolIndicesContext(const SearchIndexInfo &info) : RefCountedContext("SymbolIndicesContext")
 {
   p = new Private(info);
 }
@@ -9909,7 +9776,7 @@ TemplateListIntf::ConstIterator *SymbolIndicesContext::createIterator() const
 class SearchIndexContext::Private
 {
   public:
-    Private(const SearchIndexInfo *info) : m_info(info)
+    Private(const SearchIndexInfo &info) : m_info(info)
     {
       static bool init=FALSE;
       if (!init)
@@ -9926,11 +9793,11 @@ class SearchIndexContext::Private
     }
     TemplateVariant name() const
     {
-      return m_info->name;
+      return m_info.name;
     }
     TemplateVariant text() const
     {
-      return m_info->text;
+      return m_info.getText();
     }
     TemplateVariant symbolIndices() const
     {
@@ -9941,7 +9808,7 @@ class SearchIndexContext::Private
       return m_cache.symbolIndices.get();
     }
   private:
-    const SearchIndexInfo *m_info;
+    const SearchIndexInfo &m_info;
     struct Cachable
     {
       SharedPtr<SymbolIndicesContext> symbolIndices;
@@ -9953,7 +9820,7 @@ class SearchIndexContext::Private
 
 PropertyMapper<SearchIndexContext::Private> SearchIndexContext::Private::s_inst;
 
-SearchIndexContext::SearchIndexContext(const SearchIndexInfo *info)
+SearchIndexContext::SearchIndexContext(const SearchIndexInfo &info)
     : RefCountedContext("SearchIndexContext")
 {
   p = new Private(info);
@@ -9977,10 +9844,9 @@ class SearchIndicesContext::Private : public GenericNodeListContext
   public:
     Private()
     {
-      const SearchIndexInfo *indices = getSearchIndices();
-      for (int i=0;i<NUM_SEARCH_INDICES;i++)
+      for (const auto &si : getSearchIndices())
       {
-        append(SearchIndexContext::alloc(&indices[i]));
+        append(SearchIndexContext::alloc(si));
       }
     }
 };
@@ -10170,8 +10036,8 @@ void generateOutputViaTemplate()
       SharedPtr<DirListContext>               dirList              (DirListContext::alloc());
       SharedPtr<FileListContext>              fileList             (FileListContext::alloc());
       SharedPtr<FileTreeContext>              fileTree             (FileTreeContext::alloc());
-      SharedPtr<PageTreeContext>              pageTree             (PageTreeContext::alloc(Doxygen::pageSDict));
-      SharedPtr<PageListContext>              pageList             (PageListContext::alloc(Doxygen::pageSDict));
+      SharedPtr<PageTreeContext>              pageTree             (PageTreeContext::alloc(*Doxygen::pageLinkedMap));
+      SharedPtr<PageListContext>              pageList             (PageListContext::alloc(*Doxygen::pageLinkedMap));
       SharedPtr<ExampleTreeContext>           exampleTree          (ExampleTreeContext::alloc());
       SharedPtr<ExampleListContext>           exampleList          (ExampleListContext::alloc());
       SharedPtr<ModuleTreeContext>            moduleTree           (ModuleTreeContext::alloc());
@@ -10220,15 +10086,15 @@ void generateOutputViaTemplate()
       //%% Page mainPage
       if (Doxygen::mainPage)
       {
-        SharedPtr<PageContext> mainPage(PageContext::alloc(Doxygen::mainPage,TRUE,FALSE));
+        SharedPtr<PageContext> mainPage(PageContext::alloc(Doxygen::mainPage.get(),TRUE,FALSE));
         ctx->set("mainPage",mainPage.get());
       }
       else
       {
         // TODO: for LaTeX output index should be main... => solve in template
-        Doxygen::mainPage = createPageDef("[generated]",1,"index","",theTranslator->trMainPage());
+        Doxygen::mainPage.reset(createPageDef("[generated]",1,"index","",theTranslator->trMainPage()));
         Doxygen::mainPage->setFileName("index");
-        SharedPtr<PageContext> mainPage(PageContext::alloc(Doxygen::mainPage,TRUE,FALSE));
+        SharedPtr<PageContext> mainPage(PageContext::alloc(Doxygen::mainPage.get(),TRUE,FALSE));
         ctx->set("mainPage",mainPage.get());
       }
       //%% GlobalsIndex globalsIndex:

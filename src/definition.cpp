@@ -68,7 +68,7 @@ class DefinitionImpl::IMPL
     std::unordered_map<std::string,const MemberDef *> sourceRefByDict;
     std::unordered_map<std::string,const MemberDef *> sourceRefsDict;
     RefItemVector xrefListItems;
-    GroupList *partOfGroups = 0;
+    GroupList partOfGroups;
 
     DocInfo   *details = 0;    // not exported
     DocInfo   *inbodyDocs = 0; // not exported
@@ -107,7 +107,6 @@ class DefinitionImpl::IMPL
 
 DefinitionImpl::IMPL::~IMPL()
 {
-  delete partOfGroups;
   delete brief;
   delete details;
   delete body;
@@ -146,7 +145,6 @@ void DefinitionImpl::IMPL::init(const char *df, const char *n)
   sourceRefByDict.clear();
   sourceRefsDict.clear();
   outerScope      = Doxygen::globalScope;
-  partOfGroups    = 0;
   hidden          = FALSE;
   isArtificial    = FALSE;
   lang            = SrcLangExt_Unknown;
@@ -263,20 +261,10 @@ DefinitionImpl::DefinitionImpl(const DefinitionImpl &d)
 {
   m_impl = new DefinitionImpl::IMPL;
   *m_impl = *d.m_impl;
-  m_impl->partOfGroups = 0;
   m_impl->brief = 0;
   m_impl->details = 0;
   m_impl->body = 0;
   m_impl->inbodyDocs = 0;
-  if (d.m_impl->partOfGroups)
-  {
-    GroupListIterator it(*d.m_impl->partOfGroups);
-    GroupDef *gd;
-    for (it.toFirst();(gd=it.current());++it)
-    {
-      makePartOfGroup(gd);
-    }
-  }
   if (d.m_impl->brief)
   {
     m_impl->brief = new BriefInfo(*d.m_impl->brief);
@@ -303,11 +291,8 @@ DefinitionImpl::~DefinitionImpl()
   {
     removeFromMap(m_impl->symbolName,m_impl->def);
   }
-  if (m_impl)
-  {
-    delete m_impl;
-    m_impl=0;
-  }
+  delete m_impl;
+  m_impl=0;
 }
 
 void DefinitionImpl::setName(const char *name)
@@ -326,7 +311,7 @@ void DefinitionImpl::setId(const char *id)
   if (Doxygen::clangUsrMap)
   {
     //printf("DefinitionImpl::setId '%s'->'%s'\n",id,m_impl->name.data());
-    Doxygen::clangUsrMap->insert(id,m_impl->def);
+    Doxygen::clangUsrMap->insert(std::make_pair(id,m_impl->def));
   }
 }
 
@@ -631,7 +616,7 @@ struct FilterCacheItem
 class FilterCache
 {
   public:
-    FilterCache() : m_endPos(0) { m_cache.setAutoDelete(TRUE); }
+    FilterCache() : m_endPos(0) { }
     bool getFileContents(const QCString &fileName,BufStr &str)
     {
       static bool filterSourceFiles = Config_getBool(FILTER_SOURCE_FILES);
@@ -640,30 +625,31 @@ class FilterCache
       FILE *f=0;
       const int blockSize = 4096;
       char buf[blockSize];
-      FilterCacheItem *item=0;
-      if (usePipe && (item = m_cache.find(fileName))) // cache hit: reuse stored result
+      auto it = m_cache.find(fileName.str());
+      if (usePipe && it!=m_cache.end()) // cache hit: reuse stored result
       {
+        auto item = it->second;
         //printf("getFileContents(%s): cache hit\n",qPrint(fileName));
         // file already processed, get the results after filtering from the tmp file
         Debug::print(Debug::FilterOutput,0,"Reusing filter result for %s from %s at offset=%d size=%d\n",
-               qPrint(fileName),qPrint(Doxygen::filterDBFileName),(int)item->filePos,(int)item->fileSize);
+               qPrint(fileName),qPrint(Doxygen::filterDBFileName),(int)item.filePos,(int)item.fileSize);
         f = Portable::fopen(Doxygen::filterDBFileName,"rb");
         if (f)
         {
           bool success=TRUE;
-          str.resize(static_cast<uint>(item->fileSize+1));
-          if (Portable::fseek(f,item->filePos,SEEK_SET)==-1)
+          str.resize(static_cast<uint>(item.fileSize+1));
+          if (Portable::fseek(f,item.filePos,SEEK_SET)==-1)
           {
-            err("Failed to seek to position %d in filter database file %s\n",(int)item->filePos,qPrint(Doxygen::filterDBFileName));
+            err("Failed to seek to position %d in filter database file %s\n",(int)item.filePos,qPrint(Doxygen::filterDBFileName));
             success=FALSE;
           }
           if (success)
           {
-            size_t numBytes = fread(str.data(),1,item->fileSize,f);
-            if (numBytes!=item->fileSize)
+            size_t numBytes = fread(str.data(),1,item.fileSize,f);
+            if (numBytes!=item.fileSize)
             {
               err("Failed to read %d bytes from position %d in filter database file %s: got %d bytes\n",
-                 (int)item->fileSize,(int)item->filePos,qPrint(Doxygen::filterDBFileName),(int)numBytes);
+                 (int)item.fileSize,(int)item.filePos,qPrint(Doxygen::filterDBFileName),(int)numBytes);
               success=FALSE;
             }
           }
@@ -685,14 +671,13 @@ class FilterCache
         Debug::print(Debug::ExtCmd,0,"Executing popen(`%s`)\n",qPrint(cmd));
         f = Portable::popen(cmd,"r");
         FILE *bf = Portable::fopen(Doxygen::filterDBFileName,"a+b");
-        item = new FilterCacheItem;
-        item->filePos = m_endPos;
+        FilterCacheItem item;
+        item.filePos = m_endPos;
         if (bf==0)
         {
           // handle error
           err("Error opening filter database file %s\n",qPrint(Doxygen::filterDBFileName));
           str.addChar('\0');
-          delete item;
           Portable::pclose(f);
           return FALSE;
         }
@@ -708,7 +693,6 @@ class FilterCache
             err("Failed to write to filter database %s. Wrote %d out of %d bytes\n",
                 qPrint(Doxygen::filterDBFileName),(int)bytesWritten,(int)bytesRead);
             str.addChar('\0');
-            delete item;
             Portable::pclose(f);
             fclose(bf);
             return FALSE;
@@ -717,11 +701,11 @@ class FilterCache
           str.addArray(buf,static_cast<uint>(bytesWritten));
         }
         str.addChar('\0');
-        item->fileSize = size;
+        item.fileSize = size;
         // add location entry to the dictionary
-        m_cache.append(fileName,item);
+        m_cache.insert(std::make_pair(fileName.str(),item));
         Debug::print(Debug::FilterOutput,0,"Storing new filter result for %s in %s at offset=%d size=%d\n",
-               qPrint(fileName),qPrint(Doxygen::filterDBFileName),(int)item->filePos,(int)item->fileSize);
+               qPrint(fileName),qPrint(Doxygen::filterDBFileName),(int)item.filePos,(int)item.fileSize);
         // update end of file position
         m_endPos += size;
         Portable::pclose(f);
@@ -743,7 +727,7 @@ class FilterCache
       return TRUE;
     }
   private:
-    SDict<FilterCacheItem> m_cache;
+    std::unordered_map<std::string,FilterCacheItem> m_cache;
     portable_off_t m_endPos;
 };
 
@@ -1506,10 +1490,9 @@ QCString DefinitionImpl::localName() const
   return m_impl->localName;
 }
 
-void DefinitionImpl::makePartOfGroup(GroupDef *gd)
+void DefinitionImpl::makePartOfGroup(const GroupDef *gd)
 {
-  if (m_impl->partOfGroups==0) m_impl->partOfGroups = new GroupList;
-  m_impl->partOfGroups->append(gd);
+  m_impl->partOfGroups.push_back(gd);
 }
 
 void DefinitionImpl::setRefItems(const RefItemVector &sli)
@@ -2000,24 +1983,18 @@ FileDef *DefinitionImpl::getBodyDef() const
   return m_impl->body ? m_impl->body->fileDef : 0;
 }
 
-GroupList *DefinitionImpl::partOfGroups() const
+const GroupList &DefinitionImpl::partOfGroups() const
 {
   return m_impl->partOfGroups;
 }
 
 bool DefinitionImpl::isLinkableViaGroup() const
 {
-  GroupList *gl = partOfGroups();
-  if (gl)
+  for (const auto &gd : partOfGroups())
   {
-    GroupListIterator gli(*gl);
-    GroupDef *gd;
-    for (gli.toFirst();(gd=gli.current());++gli)
-    {
-      if (gd->isLinkable()) return TRUE;
-    }
+    if (gd->isLinkable()) return true;
   }
-  return FALSE;
+  return false;
 }
 
 Definition *DefinitionImpl::getOuterScope() const
@@ -2120,10 +2097,10 @@ QCString DefinitionImpl::externalReference(const QCString &relPath) const
   QCString ref = getReference();
   if (!ref.isEmpty())
   {
-    QCString *dest = Doxygen::tagDestinationDict[ref];
-    if (dest)
+    auto it = Doxygen::tagDestinationMap.find(ref.str());
+    if (it!=Doxygen::tagDestinationMap.end())
     {
-      QCString result = *dest;
+      QCString result = it->second;
       uint l = result.length();
       if (!relPath.isEmpty() && l>0 && result.at(0)=='.')
       { // relative path -> prepend relPath.
